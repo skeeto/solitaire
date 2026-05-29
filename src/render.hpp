@@ -24,7 +24,7 @@ struct Layout {
     float uiTextScale = 2.0f;
 };
 
-Layout computeLayout(float w, float h);
+Layout computeLayout(float w, float h, int wasteCount);
 
 // Rect of the card at depth `i` (0 = bottom) in tableau column `col`.
 SDL_FRect tableauCardRect(const Layout& L, int col, int i);
@@ -45,6 +45,7 @@ public:
 
     void drawCard(SDL_FRect rc, Card card, bool highlight = false);
     void drawCardBack(SDL_FRect rc);
+    void drawDeck(SDL_FRect rc, int cardsLeft);  // card back with a thickness proportional to draws left
     void drawSlot(SDL_FRect rc, bool freecell = false);
     void drawSuit(Suit s, float cx, float cy, float size);
 

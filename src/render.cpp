@@ -29,10 +29,24 @@ SDL_FRect tableauCardRect(const Layout& L, int col, int i) {
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
-Layout computeLayout(float w, float h) {
+// Fan offset between stacked waste cards: comfortable when few, shrinking to
+// fit within `avail` so the entire waste stays visible no matter how many.
+static float wasteFanFor(float cardW, float avail, int count) {
+    float comfy = cardW * 0.34f;
+    if (count <= 1) return comfy;
+    return std::min(comfy, (avail - cardW) / (count - 1));
+}
+
+Layout computeLayout(float w, float h, int wasteCount) {
     Layout L;
     L.vertical = h > w;
     const float margin = std::max(8.0f, std::min(w, h) * 0.02f);
+
+    // A tableau fan offset of at least ~0.30*cardH keeps each buried card's
+    // corner index readable; cap it so short stacks don't spread too far.
+    auto fanForHeight = [](float cardH, float availH) {
+        return std::clamp((availH - cardH) / 19.0f, cardH * 0.30f, cardH * 0.42f);
+    };
 
     if (L.vertical) {
         const float gap = std::max(4.0f, w * 0.012f);
@@ -50,56 +64,62 @@ Layout computeLayout(float w, float h) {
         L.redealBtn = SDL_FRect{w - margin - redealW, btnTop, redealW, btnH};
         L.muteBtn = SDL_FRect{L.redealBtn.x - gap - btnH, btnTop, btnH, btnH};
 
-        const float rowY = margin + headerH;
-        L.stock = SDL_FRect{margin, rowY, L.cardW, L.cardH};
-        L.waste = SDL_FRect{margin + L.cardW + gap, rowY, L.cardW, L.cardH};
+        // Row A: stock (left) + foundations (right), arranged horizontally on top.
+        const float rowA = margin + headerH;
+        L.stock = SDL_FRect{margin, rowA, L.cardW, L.cardH};
         for (int i = 0; i < 4; ++i) {
             float x = (w - margin - L.cardW) - (3 - i) * (L.cardW + gap);
-            L.foundations[i] = SDL_FRect{x, rowY, L.cardW, L.cardH};
+            L.foundations[i] = SDL_FRect{x, rowA, L.cardW, L.cardH};
         }
 
-        const float tabTop = rowY + L.cardH + gap * 1.5f;
+        // Row B: the waste gets its own full-width row to spill across.
+        const float rowB = rowA + L.cardH + gap;
+        L.waste = SDL_FRect{margin, rowB, L.cardW, L.cardH};
+        L.wasteFan = wasteFanFor(L.cardW, w - 2 * margin, wasteCount);
+
+        const float tabTop = rowB + L.cardH + gap * 1.2f;
         for (int col = 0; col < 7; ++col)
             L.tableau[col] = SDL_FRect{margin + col * (L.cardW + gap), tabTop, L.cardW, L.cardH};
-
-        const float availH = h - tabTop - margin;
-        L.fanY = std::clamp((availH - L.cardH) / 19.0f, L.cardH * 0.16f, L.cardH * 0.30f);
-        L.wasteFan = L.cardW * 0.28f;
+        L.fanY = fanForHeight(L.cardH, h - tabTop - margin);
     } else {
-        // Horizontal: foundations stacked on the left, tableau given extra room.
+        // Horizontal: foundations stacked on the left. Cards are sized smaller so
+        // tableau fans stay readable, and the waste spills along the top row.
         const float widthBound = (w - 3 * margin) / 10.5f;
-        const float heightBound = (h - 2 * margin) / 6.1f;       // 4 foundations tall
-        const float colsBound = (h - 2 * margin) / (kCardAspect * 3.2f);
-        L.cardW = std::min({widthBound, heightBound, colsBound});
+        const float colFanBound = (h - 2 * margin) / 7.8f;  // room for a ~12-card fan
+        L.cardW = std::min(widthBound, colFanBound);
         L.cardH = L.cardW * kCardAspect;
         L.uiTextScale = std::max(1.5f, L.cardH * 0.040f);
 
         const float fgap = L.cardH * 0.12f;
         const float colGap = L.cardW * 0.35f;  // breathing room between columns
-        const float bigPad = L.cardW * 0.45f;   // gap between foundations and tableau
+        const float bigPad = L.cardW * 0.45f;  // gap between foundations and tableau
 
+        // Centre the 4-foundation stack vertically on the left.
+        const float fStackH = 4 * L.cardH + 3 * fgap;
+        const float fTop = std::max(margin, (h - fStackH) * 0.5f);
         for (int i = 0; i < 4; ++i)
-            L.foundations[i] = SDL_FRect{margin, margin + i * (L.cardH + fgap), L.cardW, L.cardH};
+            L.foundations[i] = SDL_FRect{margin, fTop + i * (L.cardH + fgap), L.cardW, L.cardH};
+
+        // Wins counter + buttons cluster, top-right.
+        const float winsH = kDebugGlyph * L.uiTextScale;
+        const float btnH = std::max(22.0f, L.cardH * 0.30f);
+        const float redealW = L.cardW * 1.6f;
+        L.winsAnchor = SDL_FRect{w - margin, margin, 0, 0};
+        const float btnTop = margin + winsH + margin * 0.6f;
+        L.redealBtn = SDL_FRect{w - margin - redealW, btnTop, redealW, btnH};
+        L.muteBtn = SDL_FRect{L.redealBtn.x - margin * 0.6f - btnH, btnTop, btnH, btnH};
+        const float clusterW = std::max(redealW + margin + btnH, 10 * kDebugGlyph * L.uiTextScale);
+        const float clusterLeft = w - margin - clusterW;
 
         const float rightX = margin + L.cardW + bigPad;
         L.stock = SDL_FRect{rightX, margin, L.cardW, L.cardH};
         L.waste = SDL_FRect{rightX + L.cardW + colGap, margin, L.cardW, L.cardH};
+        L.wasteFan = wasteFanFor(L.cardW, (clusterLeft - margin) - L.waste.x, wasteCount);
 
         const float tabTop = margin + L.cardH + L.cardH * 0.18f;
         for (int col = 0; col < 7; ++col)
             L.tableau[col] = SDL_FRect{rightX + col * (L.cardW + colGap), tabTop, L.cardW, L.cardH};
-
-        const float availH = h - tabTop - margin;
-        L.fanY = std::clamp((availH - L.cardH) / 19.0f, L.cardH * 0.14f, L.cardH * 0.26f);
-        L.wasteFan = L.cardW * 0.28f;
-
-        const float winsH = kDebugGlyph * L.uiTextScale;
-        const float btnH = std::max(22.0f, L.cardH * 0.30f);
-        L.winsAnchor = SDL_FRect{w - margin, margin, 0, 0};
-        const float btnTop = margin + winsH + margin * 0.6f;
-        const float redealW = L.cardW * 1.6f;
-        L.redealBtn = SDL_FRect{w - margin - redealW, btnTop, redealW, btnH};
-        L.muteBtn = SDL_FRect{L.redealBtn.x - margin * 0.6f - btnH, btnTop, btnH, btnH};
+        L.fanY = fanForHeight(L.cardH, h - tabTop - margin);
     }
     return L;
 }
@@ -250,6 +270,27 @@ void Renderer::drawCardBack(SDL_FRect rc) {
     fillRoundedRect(a, radius - border, rgba(46, 78, 150));
     SDL_FRect b{rc.x + rc.w * 0.16f, rc.y + rc.h * 0.12f, rc.w * 0.68f, rc.h * 0.76f};
     fillRoundedRect(b, radius * 0.6f, rgba(70, 110, 196));
+}
+
+void Renderer::drawDeck(SDL_FRect rc, int cardsLeft) {
+    if (cardsLeft <= 0) {
+        drawSlot(rc);
+        return;
+    }
+    // Each click draws three, so the visible thickness tracks draws remaining.
+    int draws = (cardsLeft + 2) / 3;
+    int layers = std::min(draws, 8);
+    const float off = std::max(1.0f, rc.w * 0.028f);
+    const float radius = rc.w * 0.12f;
+    const float border = std::max(1.5f, rc.w * 0.03f);
+    // Edges of the cards beneath the top, offset down-right, drawn back-to-front.
+    for (int i = layers - 1; i >= 1; --i) {
+        SDL_FRect e{rc.x + i * off, rc.y + i * off, rc.w, rc.h};
+        fillRoundedRect(e, radius, rgba(18, 18, 28));
+        SDL_FRect inner{e.x + border, e.y + border, e.w - 2 * border, e.h - 2 * border};
+        fillRoundedRect(inner, radius - border, rgba(38, 64, 122));
+    }
+    drawCardBack(rc);
 }
 
 void Renderer::drawSlot(SDL_FRect rc, bool freecell) {

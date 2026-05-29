@@ -75,6 +75,28 @@ std::vector<float> makeSwoosh(int rate) {
     return out;
 }
 
+// A riffle shuffle: a train of short noise transients (cards flicking past)
+// under a gentle low-pass, tapering off toward the end.
+std::vector<float> makeShuffle(int rate) {
+    int n = static_cast<int>(rate * 0.5f);
+    std::vector<float> out(n, 0.0f);
+    Noise noise;
+    const int ticks = 18;
+    for (int k = 0; k < ticks; ++k) {
+        float center = 0.02f + 0.024f * k;  // ticks crowd the first ~0.45 s
+        int start = static_cast<int>(center * rate);
+        int len = static_cast<int>(0.014f * rate);
+        float amp = 0.5f * (1.0f - 0.5f * k / ticks);  // taper
+        for (int j = 0; j < len && start + j < n; ++j) {
+            float e = std::exp(-static_cast<float>(j) / len * 5.0f);
+            out[start + j] += noise() * e * amp;
+        }
+    }
+    LowPass lp(0.45f);
+    for (float& x : out) x = lp(x);
+    return out;
+}
+
 }  // namespace
 
 bool Audio::init() {
@@ -82,6 +104,7 @@ bool Audio::init() {
     clips_[static_cast<int>(Sfx::Pickup)] = makeClick(kRate, 920.0f, 0.045f, 90.0f);
     clips_[static_cast<int>(Sfx::Drop)] = makeClick(kRate, 480.0f, 0.075f, 60.0f);
     clips_[static_cast<int>(Sfx::Swoosh)] = makeSwoosh(kRate);
+    clips_[static_cast<int>(Sfx::Shuffle)] = makeShuffle(kRate);
 
     SDL_AudioSpec spec{};
     spec.freq = kRate;

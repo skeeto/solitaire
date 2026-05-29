@@ -19,6 +19,8 @@
 
 namespace {
 constexpr Uint64 kDoubleClickMs = 350;
+constexpr float kDealStagger = 0.035f;  // delay between successive dealt cards
+constexpr float kDealDur = 0.16f;        // flight time of one dealt card
 
 float smoothstep(float t) {
     t = std::clamp(t, 0.0f, 1.0f);
@@ -59,6 +61,13 @@ struct App {
     bool won = false;
     Uint64 lastTick = 0;
 
+    // Deal animation: cards fly from the stock to their tableau slots, staggered.
+    bool dealing = false;
+    float dealStart = 0, dealEnd = 0;
+    float dealRevealAt[7][7]{};  // [col][row] = seconds after dealStart to begin
+
+    float nowSec() const { return SDL_GetTicks() / 1000.0f; }
+
     // pending pointer interaction
     bool havePress = false;
     PileKind pressKind = PileKind::Tableau;
@@ -85,12 +94,12 @@ struct App {
     void refreshLayout() {
         int w = 0, h = 0;
         SDL_GetCurrentRenderOutputSize(sdl, &w, &h);
-        layout = computeLayout((float)w, (float)h);
+        layout = computeLayout((float)w, (float)h, (int)game.waste.size());
     }
 
     SDL_FRect wasteTopRect() const {
         int n = (int)game.waste.size();
-        int j = std::min(2, std::max(0, n - 1));
+        int j = std::max(0, n - 1);  // entire waste is shown; top card is the last
         return SDL_FRect{layout.waste.x + j * layout.wasteFan, layout.waste.y, layout.cardW, layout.cardH};
     }
 
@@ -105,7 +114,18 @@ struct App {
         won = false;
         lift = Lift{};
         havePress = false;
-        maybeAutoMove();
+        audio.play(Sfx::Shuffle);
+        startDealAnim();
+    }
+
+    void startDealAnim() {
+        dealing = true;
+        dealStart = nowSec();
+        int k = 0;
+        // Reveal in row-major order for a staggered diagonal cascade.
+        for (int row = 0; row < 7; ++row)
+            for (int col = row; col < 7; ++col) dealRevealAt[col][row] = (k++) * kDealStagger;
+        dealEnd = (k - 1) * kDealStagger + kDealDur;
     }
 
     // Hit-test the board (not UI). Fills press* and returns true on a grabbable card.
@@ -176,11 +196,20 @@ struct App {
         float cx = lx + layout.cardW * 0.5f, cy = ly + layout.cardH * 0.5f;
 
         bool valid = false;
-        if (lift.cards.size() == 1 && game.freecellUnlocked && !game.freecell &&
+        // Drag a single foundation-ready card onto any foundation slot.
+        if (lift.cards.size() == 1 && game.foundationReady(lift.cards[0])) {
+            for (int i = 0; i < 4 && !valid; ++i)
+                if (inRect(cx, cy, layout.foundations[i])) {
+                    game.foundation[(int)lift.cards[0].suit] = lift.cards[0].rank;
+                    valid = true;
+                }
+        }
+        if (!valid && lift.cards.size() == 1 && game.freecellUnlocked && !game.freecell &&
             inRect(cx, cy, layout.stock)) {
             game.freecell = lift.cards[0];
             valid = true;
-        } else {
+        }
+        if (!valid) {
             int dest = -1;
             for (int col = 0; col < 7; ++col)
                 if (cx >= layout.tableau[col].x && cx < layout.tableau[col].x + layout.cardW) dest = col;
@@ -208,9 +237,9 @@ struct App {
             tx = layout.tableau[lift.col].x;
             ty = layout.tableau[lift.col].y + (int)game.tableau[lift.col].size() * layout.fanY;
         } else if (lift.src == PileKind::Waste) {
-            SDL_FRect r = wasteTopRect();
-            tx = r.x;
-            ty = r.y;
+            // Card was popped on pickup; it returns to the end of the waste.
+            tx = layout.waste.x + (int)game.waste.size() * layout.wasteFan;
+            ty = layout.waste.y;
         } else {
             tx = layout.stock.x;
             ty = layout.stock.y;
@@ -251,7 +280,7 @@ struct App {
     }
 
     void maybeAutoMove() {
-        if (lift.active) return;
+        if (lift.active || dealing) return;
         auto mv = game.findAutoMove();
         if (!mv) return;
         Card c = mv->card;
@@ -327,7 +356,7 @@ struct App {
             setMuted(!stats.muted);
             return;
         }
-        if (won || (lift.active && !lift.followPointer)) return;  // animating or finished
+        if (won || dealing || (lift.active && !lift.followPointer)) return;  // animating/dealing
 
         if (!game.stock.empty() && inRect(x, y, layout.stock)) {
             game.draw3();
@@ -397,33 +426,40 @@ struct App {
             }
         }
 
-        // Stock / waste / free cell.
+        // Stock (with thickness for draws left) / waste / free cell.
         if (!game.stock.empty()) {
-            rr.drawCardBack(layout.stock);
+            rr.drawDeck(layout.stock, (int)game.stock.size());
         } else if (game.freecellUnlocked) {
             rr.drawSlot(layout.stock, true);
             if (game.freecell) rr.drawCard(layout.stock, *game.freecell);
         } else {
             rr.drawSlot(layout.stock);
         }
+        // Waste: the entire pile spills rightward so every card can be read.
         rr.drawSlot(layout.waste);
-        {
-            int n = (int)game.waste.size();
-            int vis = std::min(3, n);
-            for (int k = 0; k < vis; ++k) {
-                Card c = game.waste[n - vis + k];
-                rr.drawCard(SDL_FRect{layout.waste.x + k * layout.wasteFan, layout.waste.y,
-                                      layout.cardW, layout.cardH},
-                            c);
-            }
-        }
+        for (int k = 0; k < (int)game.waste.size(); ++k)
+            rr.drawCard(SDL_FRect{layout.waste.x + k * layout.wasteFan, layout.waste.y,
+                                  layout.cardW, layout.cardH},
+                        game.waste[k]);
 
-        // Tableau.
+        // Tableau (during the deal each card flies in from the stock).
+        const float el = nowSec() - dealStart;
         for (int col = 0; col < 7; ++col) {
             int n = (int)game.tableau[col].size();
             if (n == 0) rr.drawSlot(layout.tableau[col]);
-            for (int i = 0; i < n; ++i)
-                rr.drawCard(tableauCardRect(layout, col, i), game.tableau[col][i]);
+            for (int i = 0; i < n; ++i) {
+                SDL_FRect slot = tableauCardRect(layout, col, i);
+                if (dealing && i <= col) {
+                    float reveal = dealRevealAt[col][i];
+                    if (el < reveal) continue;  // not dealt yet
+                    if (el < reveal + kDealDur) {
+                        float u = smoothstep((el - reveal) / kDealDur);
+                        slot.x = lerp(layout.stock.x, slot.x, u);
+                        slot.y = lerp(layout.stock.y, slot.y, u);
+                    }
+                }
+                rr.drawCard(slot, game.tableau[col][i]);
+            }
         }
 
         // UI: wins counter (top-right), buttons.
@@ -477,6 +513,11 @@ struct App {
 
         audio.update();
 
+        if (dealing && nowSec() - dealStart > dealEnd) {
+            dealing = false;
+            maybeAutoMove();  // nothing eligible at deal time, but stay consistent
+        }
+
         if (lift.active && !lift.followPointer) {
             lift.t += dt;
             if (lift.t >= lift.dur) {
@@ -516,7 +557,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
     app->lastTick = SDL_GetTicks();
     app->syncWindow();
     app->refreshLayout();
-    app->maybeAutoMove();
+    app->startDealAnim();  // animate the opening deal
     return SDL_APP_CONTINUE;
 }
 
