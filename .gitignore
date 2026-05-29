@@ -1,0 +1,6 @@
+/build/
+/build-web/
+/build-*/
+*.o
+*.obj
+.DS_Store

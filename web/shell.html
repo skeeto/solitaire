@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b543e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <title>Sawayama Solitaire</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+                 background: #0b543e; }
+    body { position: fixed; inset: 0; }
+    canvas#canvas { display: block; width: 100%; height: 100%; outline: none;
+                    touch-action: none; }
+    #loading { position: absolute; inset: 0; display: flex; align-items: center;
+               justify-content: center; color: #cfe9df; font: 16px system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading…</div>
+  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <script>
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      onRuntimeInitialized: function () {
+        var l = document.getElementById('loading');
+        if (l) l.remove();
+      }
+    };
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {});
+      });
+    }
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
