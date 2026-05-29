@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "audio.hpp"
@@ -56,9 +57,11 @@ struct App {
     Game game;
     Stats stats;
     Layout layout;
+    float outW = 0, outH = 0;  // render-target size used for the current layout
 
     Lift lift;
     bool won = false;
+    bool gameDirty = false;  // game changed since last save; persisted once settled
     Uint64 lastTick = 0;
 
     // Deal animation: cards fly from the stock to their tableau slots, staggered.
@@ -94,13 +97,13 @@ struct App {
     void refreshLayout() {
         int w = 0, h = 0;
         SDL_GetCurrentRenderOutputSize(sdl, &w, &h);
+        outW = (float)w;
+        outH = (float)h;
         layout = computeLayout((float)w, (float)h, (int)game.waste.size());
     }
 
     SDL_FRect wasteTopRect() const {
-        int n = (int)game.waste.size();
-        int j = std::max(0, n - 1);  // entire waste is shown; top card is the last
-        return SDL_FRect{layout.waste.x + j * layout.wasteFan, layout.waste.y, layout.cardW, layout.cardH};
+        return wasteCardRect(layout, std::max(0, (int)game.waste.size() - 1));
     }
 
     void setMuted(bool m) {
@@ -114,6 +117,7 @@ struct App {
         won = false;
         lift = Lift{};
         havePress = false;
+        gameDirty = true;
         audio.play(Sfx::Shuffle);
         startDealAnim();
     }
@@ -223,6 +227,7 @@ struct App {
             audio.play(Sfx::Drop);
             lift.active = false;
             lift.cards.clear();
+            gameDirty = true;
             maybeAutoMove();
             checkWin();
         } else {
@@ -238,8 +243,9 @@ struct App {
             ty = layout.tableau[lift.col].y + (int)game.tableau[lift.col].size() * layout.fanY;
         } else if (lift.src == PileKind::Waste) {
             // Card was popped on pickup; it returns to the end of the waste.
-            tx = layout.waste.x + (int)game.waste.size() * layout.wasteFan;
-            ty = layout.waste.y;
+            SDL_FRect r = wasteCardRect(layout, (int)game.waste.size());
+            tx = r.x;
+            ty = r.y;
         } else {
             tx = layout.stock.x;
             ty = layout.stock.y;
@@ -344,6 +350,8 @@ struct App {
             won = true;
             stats.wins++;
             saveStats(stats);
+            clearGame();  // a finished game shouldn't be resumed
+            gameDirty = false;
         }
     }
 
@@ -361,6 +369,7 @@ struct App {
         if (!game.stock.empty() && inRect(x, y, layout.stock)) {
             game.draw3();
             audio.play(Sfx::Flip);
+            gameDirty = true;
             maybeAutoMove();
             return;
         }
@@ -420,9 +429,11 @@ struct App {
             if (game.foundation[i] > 0) {
                 rr.drawCard(layout.foundations[i], Card{(Suit)i, game.foundation[i]});
             } else {
-                rr.drawSlot(layout.foundations[i]);
+                // Distinct dark panel (not the table green) with a faint suit mark.
                 SDL_FRect f = layout.foundations[i];
-                rr.drawSuit((Suit)i, f.x + f.w * 0.5f, f.y + f.h * 0.5f, f.h * 0.22f);
+                rr.fillRoundedRect(f, f.w * 0.12f, rgba(22, 48, 40));
+                rr.drawSuit((Suit)i, f.x + f.w * 0.5f, f.y + f.h * 0.5f, f.h * 0.24f,
+                            rgba(232, 238, 230, 70));
             }
         }
 
@@ -435,12 +446,11 @@ struct App {
         } else {
             rr.drawSlot(layout.stock);
         }
-        // Waste: the entire pile spills rightward so every card can be read.
+        // Waste: the entire pile spills rightward (wrapping to a 2nd row) so every
+        // card can be read.
         rr.drawSlot(layout.waste);
         for (int k = 0; k < (int)game.waste.size(); ++k)
-            rr.drawCard(SDL_FRect{layout.waste.x + k * layout.wasteFan, layout.waste.y,
-                                  layout.cardW, layout.cardH},
-                        game.waste[k]);
+            rr.drawCard(wasteCardRect(layout, k), game.waste[k]);
 
         // Tableau (during the deal each card flies in from the stock).
         const float el = nowSec() - dealStart;
@@ -489,9 +499,8 @@ struct App {
 
         // Win overlay.
         if (won) {
-            int w = 0, h = 0;
-            SDL_GetCurrentRenderOutputSize(sdl, &w, &h);
-            rr.fillRect(SDL_FRect{0, 0, (float)w, (float)h}, rgba(0, 0, 0, 150));
+            float w = outW, h = outH;
+            rr.fillRect(SDL_FRect{0, 0, w, h}, rgba(0, 0, 0, 150));
             float s = std::max(3.0f, layout.cardH * 0.06f);
             const char* msg = "YOU WIN!";
             rr.drawText((w - rr.textWidth(s, msg)) * 0.5f, h * 0.5f - rr.textHeight(s),
@@ -526,9 +535,16 @@ struct App {
                 lift.active = false;
                 lift.cards.clear();
                 if (cb) cb();
+                gameDirty = true;
                 maybeAutoMove();
                 checkWin();
             }
+        }
+
+        // Persist the game once it settles (no drag/animation/deal in flight).
+        if (gameDirty && !lift.active && !dealing && !won) {
+            saveGame(game.serialize());
+            gameDirty = false;
         }
         draw();
     }
@@ -556,8 +572,15 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
     app->audio.setMuted(app->stats.muted);
     app->lastTick = SDL_GetTicks();
     app->syncWindow();
+    // Resume a saved in-progress game if there is one; otherwise deal a fresh
+    // game with the opening cascade.
+    std::string saved = loadGame();
+    if (!saved.empty() && app->game.deserialize(saved) && !app->game.won()) {
+        app->dealing = false;
+    } else {
+        app->startDealAnim();
+    }
     app->refreshLayout();
-    app->startDealAnim();  // animate the opening deal
     return SDL_APP_CONTINUE;
 }
 

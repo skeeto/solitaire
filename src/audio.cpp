@@ -78,17 +78,17 @@ std::vector<float> makeSwoosh(int rate) {
 // A riffle shuffle: a train of short noise transients (cards flicking past)
 // under a gentle low-pass, tapering off toward the end.
 std::vector<float> makeShuffle(int rate) {
-    int n = static_cast<int>(rate * 0.5f);
+    int n = static_cast<int>(rate * 1.05f);  // long enough to cover the deal cascade
     std::vector<float> out(n, 0.0f);
     Noise noise;
-    const int ticks = 18;
+    const int ticks = 22;
     for (int k = 0; k < ticks; ++k) {
-        float center = 0.02f + 0.024f * k;  // ticks crowd the first ~0.45 s
+        float center = 0.03f + 0.044f * k;  // slower, spread across ~0.95 s
         int start = static_cast<int>(center * rate);
-        int len = static_cast<int>(0.014f * rate);
-        float amp = 0.5f * (1.0f - 0.5f * k / ticks);  // taper
+        int len = static_cast<int>(0.018f * rate);
+        float amp = 0.5f * (1.0f - 0.45f * k / ticks);  // gentle taper
         for (int j = 0; j < len && start + j < n; ++j) {
-            float e = std::exp(-static_cast<float>(j) / len * 5.0f);
+            float e = std::exp(-static_cast<float>(j) / len * 4.5f);
             out[start + j] += noise() * e * amp;
         }
     }

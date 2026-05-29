@@ -14,7 +14,9 @@ struct Layout {
     float wasteFan = 0;  // horizontal offset between fanned waste cards
 
     SDL_FRect stock{};       // doubles as the free-cell slot once unlocked
-    SDL_FRect waste{};
+    SDL_FRect waste{};       // origin (card 0) of the waste fan
+    int wastePerRow = 1;     // cards per row before wrapping
+    float wasteRowStep = 0;  // vertical offset between wrapped waste rows
     SDL_FRect foundations[4]{};
     SDL_FRect tableau[7]{};  // top-card rect of each column
 
@@ -28,6 +30,9 @@ Layout computeLayout(float w, float h, int wasteCount);
 
 // Rect of the card at depth `i` (0 = bottom) in tableau column `col`.
 SDL_FRect tableauCardRect(const Layout& L, int col, int i);
+
+// Rect of waste card `k` (0 = first drawn), accounting for rightward fan + wrap.
+SDL_FRect wasteCardRect(const Layout& L, int k);
 
 inline SDL_FColor rgba(int r, int g, int b, int a = 255) {
     return SDL_FColor{r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f};
@@ -48,6 +53,7 @@ public:
     void drawDeck(SDL_FRect rc, int cardsLeft);  // card back with a thickness proportional to draws left
     void drawSlot(SDL_FRect rc, bool freecell = false);
     void drawSuit(Suit s, float cx, float cy, float size);
+    void drawSuit(Suit s, float cx, float cy, float size, SDL_FColor color);
 
     void drawText(float x, float y, float scale, SDL_FColor c, const char* str);
     float textWidth(float scale, const char* str) const;

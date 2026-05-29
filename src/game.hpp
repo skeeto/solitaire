@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <random>
+#include <string>
 #include <vector>
 
 enum class Suit : int { Hearts = 0, Diamonds = 1, Spades = 2, Clubs = 3 };
@@ -66,4 +67,8 @@ struct Game {
     bool autoEligible(Card c) const;
     // Find the next card the conservative auto-mover should send up, if any.
     std::optional<AutoSource> findAutoMove() const;
+
+    // --- save/restore ---
+    std::string serialize() const;
+    bool deserialize(const std::string& s);  // returns false on malformed input
 };

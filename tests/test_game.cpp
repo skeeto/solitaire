@@ -107,6 +107,25 @@ int main() {
     CHECK(e.grabbable(1, 1));   // single top card always grabbable
     CHECK(!e.grabbable(1, 0));  // 8S,9H is not an ordered run
 
+    // --- serialize / deserialize round-trip ---
+    Game src;
+    src.deal();
+    src.draw3();
+    src.foundation = {3, 0, 1, 2};
+    src.freecellUnlocked = true;
+    src.freecell = C(Suit::Spades, 9);
+    std::string blob = src.serialize();
+    Game dst;
+    CHECK(dst.deserialize(blob));
+    CHECK(dst.foundation == src.foundation);
+    CHECK(dst.freecellUnlocked && dst.freecell && dst.freecell->rank == 9 &&
+          dst.freecell->suit == Suit::Spades);
+    CHECK(dst.stock.size() == src.stock.size());
+    CHECK(dst.waste.size() == src.waste.size());
+    for (int i = 0; i < 7; ++i) CHECK(dst.tableau[i].size() == src.tableau[i].size());
+    CHECK(dst.serialize() == blob);     // stable round-trip
+    CHECK(!dst.deserialize("garbage"));  // malformed input rejected
+
     std::printf("OK: %d checks passed\n", checks);
     return 0;
 }

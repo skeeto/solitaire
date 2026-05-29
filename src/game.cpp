@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <sstream>
 
 Game::Game() {
     rng.seed(std::random_device{}());
@@ -97,6 +98,70 @@ bool Game::autoEligible(Card c) const {
     // Keep this card while an opposite-color card of rank (c.rank - 1) is still
     // in play (it could be stacked on this card); otherwise it is safe to send up.
     return c.rank <= m;
+}
+
+// Each card serializes to an int 0..51 (suit*13 + rank-1).
+static int cardId(Card c) { return (int)c.suit * 13 + (c.rank - 1); }
+static Card cardFromId(int id) { return Card{(Suit)(id / 13), id % 13 + 1}; }
+
+std::string Game::serialize() const {
+    std::ostringstream o;
+    o << "v1\n";
+    o << "F " << foundation[0] << ' ' << foundation[1] << ' ' << foundation[2] << ' '
+      << foundation[3] << '\n';
+    o << "U " << (freecellUnlocked ? 1 : 0) << '\n';
+    o << "C " << (freecell ? cardId(*freecell) : -1) << '\n';
+    auto pile = [&](const char* tag, const std::vector<Card>& v) {
+        o << tag << ' ' << v.size();
+        for (const auto& c : v) o << ' ' << cardId(c);
+        o << '\n';
+    };
+    pile("S", stock);
+    pile("W", waste);
+    for (int i = 0; i < 7; ++i) {
+        o << 'T' << i << ' ' << tableau[i].size();
+        for (const auto& c : tableau[i]) o << ' ' << cardId(c);
+        o << '\n';
+    }
+    return o.str();
+}
+
+bool Game::deserialize(const std::string& s) {
+    std::istringstream in(s);
+    std::string tag;
+    if (!(in >> tag) || tag != "v1") return false;
+
+    std::array<int, 4> f{};
+    int u = 0, c = -1;
+    in >> tag >> f[0] >> f[1] >> f[2] >> f[3];
+    in >> tag >> u;
+    in >> tag >> c;
+
+    auto readPile = [&](std::vector<Card>& v) {
+        v.clear();
+        int n = -1;
+        if (!(in >> tag >> n) || n < 0 || n > 52) return false;
+        for (int i = 0; i < n; ++i) {
+            int id = -1;
+            if (!(in >> id) || id < 0 || id > 51) return false;
+            v.push_back(cardFromId(id));
+        }
+        return true;
+    };
+
+    std::vector<Card> s2, w2, t2[7];
+    if (!readPile(s2) || !readPile(w2)) return false;
+    for (int i = 0; i < 7; ++i)
+        if (!readPile(t2[i])) return false;
+    if (in.fail()) return false;
+
+    foundation = f;
+    freecellUnlocked = (u != 0);
+    freecell = (c >= 0 && c <= 51) ? std::optional<Card>(cardFromId(c)) : std::nullopt;
+    stock = std::move(s2);
+    waste = std::move(w2);
+    for (int i = 0; i < 7; ++i) tableau[i] = std::move(t2[i]);
+    return true;
 }
 
 std::optional<AutoSource> Game::findAutoMove() const {

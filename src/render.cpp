@@ -26,15 +26,33 @@ SDL_FRect tableauCardRect(const Layout& L, int col, int i) {
     return rc;
 }
 
+SDL_FRect wasteCardRect(const Layout& L, int k) {
+    int per = std::max(1, L.wastePerRow);
+    int row = k / per, col = k % per;
+    return SDL_FRect{L.waste.x + col * L.wasteFan, L.waste.y + row * L.wasteRowStep, L.cardW, L.cardH};
+}
+
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
-// Fan offset between stacked waste cards: comfortable when few, shrinking to
-// fit within `avail` so the entire waste stays visible no matter how many.
-static float wasteFanFor(float cardW, float avail, int count) {
-    float comfy = cardW * 0.34f;
-    if (count <= 1) return comfy;
-    return std::min(comfy, (avail - cardW) / (count - 1));
+// Lay out the waste: fan rightward at a readable offset, wrapping to a second
+// row (using vertical space) so cards never cram together. Fills wasteFan,
+// wastePerRow and wasteRowStep on the layout.
+static constexpr int kWasteMaxRows = 2;
+static constexpr float kWasteBand = 1.0f + (kWasteMaxRows - 1) * 0.52f;  // cardH multiples
+
+static void computeWaste(Layout& L, float availWasteW, int count) {
+    const float comfy = L.cardW * 0.54f;  // wide enough to reveal a two-digit rank + suit
+    L.wasteRowStep = L.cardH * 0.52f;
+    int perRow = std::max(1, (int)std::floor((availWasteW - L.cardW) / comfy) + 1);
+    int rows = (count <= 0) ? 1 : (count + perRow - 1) / perRow;
+    if (rows > kWasteMaxRows) {
+        perRow = (count + kWasteMaxRows - 1) / kWasteMaxRows;  // pack into the row limit
+        L.wasteFan = std::max(L.cardW * 0.16f, (availWasteW - L.cardW) / std::max(1, perRow - 1));
+    } else {
+        L.wasteFan = comfy;
+    }
+    L.wastePerRow = std::max(1, perRow);
 }
 
 Layout computeLayout(float w, float h, int wasteCount) {
@@ -72,12 +90,14 @@ Layout computeLayout(float w, float h, int wasteCount) {
             L.foundations[i] = SDL_FRect{x, rowA, L.cardW, L.cardH};
         }
 
-        // Row B: the waste gets its own full-width row to spill across.
-        const float rowB = rowA + L.cardH + gap;
+        // Row B: the waste gets its own full-width band to spill/wrap across,
+        // placed below the stock's rendered thickness so it never overlaps.
+        const float deckExtent = 8.0f * std::max(1.0f, L.cardW * 0.028f);
+        const float rowB = rowA + L.cardH + deckExtent + gap;
         L.waste = SDL_FRect{margin, rowB, L.cardW, L.cardH};
-        L.wasteFan = wasteFanFor(L.cardW, w - 2 * margin, wasteCount);
+        computeWaste(L, w - 2 * margin, wasteCount);
 
-        const float tabTop = rowB + L.cardH + gap * 1.2f;
+        const float tabTop = rowB + L.cardH * kWasteBand + gap * 1.2f;
         for (int col = 0; col < 7; ++col)
             L.tableau[col] = SDL_FRect{margin + col * (L.cardW + gap), tabTop, L.cardW, L.cardH};
         L.fanY = fanForHeight(L.cardH, h - tabTop - margin);
@@ -85,7 +105,7 @@ Layout computeLayout(float w, float h, int wasteCount) {
         // Horizontal: foundations stacked on the left. Cards are sized smaller so
         // tableau fans stay readable, and the waste spills along the top row.
         const float widthBound = (w - 3 * margin) / 10.5f;
-        const float colFanBound = (h - 2 * margin) / 7.8f;  // room for a ~12-card fan
+        const float colFanBound = (h - 2 * margin) / 8.3f;  // room for a ~12-card fan + waste band
         L.cardW = std::min(widthBound, colFanBound);
         L.cardH = L.cardW * kCardAspect;
         L.uiTextScale = std::max(1.5f, L.cardH * 0.040f);
@@ -114,9 +134,9 @@ Layout computeLayout(float w, float h, int wasteCount) {
         const float rightX = margin + L.cardW + bigPad;
         L.stock = SDL_FRect{rightX, margin, L.cardW, L.cardH};
         L.waste = SDL_FRect{rightX + L.cardW + colGap, margin, L.cardW, L.cardH};
-        L.wasteFan = wasteFanFor(L.cardW, (clusterLeft - margin) - L.waste.x, wasteCount);
+        computeWaste(L, (clusterLeft - margin) - L.waste.x, wasteCount);
 
-        const float tabTop = margin + L.cardH + L.cardH * 0.18f;
+        const float tabTop = margin + L.cardH * kWasteBand + L.cardH * 0.10f;
         for (int col = 0; col < 7; ++col)
             L.tableau[col] = SDL_FRect{rightX + col * (L.cardW + colGap), tabTop, L.cardW, L.cardH};
         L.fanY = fanForHeight(L.cardH, h - tabTop - margin);
@@ -203,7 +223,10 @@ void Renderer::fillRoundedRect(SDL_FRect rc, float radius, SDL_FColor c) {
 }
 
 void Renderer::drawSuit(Suit s, float cx, float cy, float size) {
-    const SDL_FColor c = isRed(s) ? red() : black();
+    drawSuit(s, cx, cy, size, isRed(s) ? red() : black());
+}
+
+void Renderer::drawSuit(Suit s, float cx, float cy, float size, SDL_FColor c) {
     auto tri = [&](float x0, float y0, float x1, float y1, float x2, float y2) {
         SDL_FPoint p[3] = {{cx + x0 * size, cy + y0 * size},
                            {cx + x1 * size, cy + y1 * size},
@@ -249,14 +272,15 @@ void Renderer::drawCard(SDL_FRect rc, Card card, bool highlight) {
     fillRoundedRect(face, radius - border, rgba(248, 246, 240));
 
     const SDL_FColor c = isRed(card.suit) ? red() : black();
-    const float scale = std::max(1.0f, rc.h * 0.028f);
+    // Compact corner index so a small fan/overlap still reveals rank + suit.
+    const float scale = std::max(1.0f, rc.h * 0.020f);
     const char* rs = rankString(card.rank);
 
     // Top-left corner: rank over a small pip.
-    float pad = rc.w * 0.10f;
+    float pad = rc.w * 0.06f;
     drawText(rc.x + pad, rc.y + pad, scale, c, rs);
     drawSuit(card.suit, rc.x + pad + kDebugGlyph * scale * 0.5f,
-             rc.y + pad + kDebugGlyph * scale + rc.h * 0.07f, rc.h * 0.11f);
+             rc.y + pad + kDebugGlyph * scale + rc.h * 0.06f, rc.h * 0.10f);
 
     // Large central pip.
     drawSuit(card.suit, rc.x + rc.w * 0.5f, rc.y + rc.h * 0.55f, rc.h * 0.34f);
