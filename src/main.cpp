@@ -112,14 +112,19 @@ struct App {
         saveStats(stats);
     }
 
+    void persist() {
+        saveGame(game.serialize());
+        gameDirty = false;
+    }
+
     void redeal() {
         game.deal();
         won = false;
         lift = Lift{};
         havePress = false;
-        gameDirty = true;
         audio.play(Sfx::Shuffle);
         startDealAnim();
+        persist();  // save the new deal immediately so a refresh resumes it
     }
 
     void startDealAnim() {
@@ -545,8 +550,7 @@ struct App {
 
         // Persist the game once it settles (no drag/animation/deal in flight).
         if (gameDirty && !lift.active && !dealing && !won) {
-            saveGame(game.serialize());
-            gameDirty = false;
+            persist();
         }
         draw();
     }
@@ -581,6 +585,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
         app->dealing = false;
     } else {
         app->startDealAnim();
+        app->persist();  // save the opening deal so a refresh resumes it
     }
     app->refreshLayout();
     return SDL_APP_CONTINUE;
