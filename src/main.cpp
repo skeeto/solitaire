@@ -429,11 +429,13 @@ struct App {
             if (game.foundation[i] > 0) {
                 rr.drawCard(layout.foundations[i], Card{(Suit)i, game.foundation[i]});
             } else {
-                // Distinct dark panel (not the table green) with a faint suit mark.
+                // Distinct dark panel (not the table green) with a muted suit mark.
+                // The mark is opaque: a translucent suit would double-blend where
+                // its sub-shapes (circles/stem) overlap and reveal internal seams.
                 SDL_FRect f = layout.foundations[i];
                 rr.fillRoundedRect(f, f.w * 0.12f, rgba(22, 48, 40));
                 rr.drawSuit((Suit)i, f.x + f.w * 0.5f, f.y + f.h * 0.5f, f.h * 0.24f,
-                            rgba(232, 238, 230, 70));
+                            rgba(79, 99, 91));
             }
         }
 
