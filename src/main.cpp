@@ -71,6 +71,11 @@ struct App {
     float dealStart = 0, dealEnd = 0;
     float dealRevealAt[7][7]{};  // [col][row] = seconds after dealStart to begin
 
+    // Draw animation: the newly drawn cards fly from the stock into the waste.
+    bool drawing = false;
+    float drawStart = 0, drawEnd = 0;
+    int drawFrom = 0;  // first waste index that is animating in
+
     float nowSec() const { return SDL_GetTicks() / 1000.0f; }
 
     // pending pointer interaction
@@ -122,6 +127,7 @@ struct App {
     void redeal() {
         game.deal();
         won = false;
+        drawing = false;
         lift = Lift{};
         havePress = false;
         audio.play(Sfx::Shuffle);
@@ -137,6 +143,13 @@ struct App {
         for (int row = 0; row < 7; ++row)
             for (int col = row; col < 7; ++col) dealRevealAt[col][row] = (k++) * kDealStagger;
         dealEnd = (k - 1) * kDealStagger + kDealDur;
+    }
+
+    void startDrawAnim(int n) {
+        drawing = true;
+        drawStart = nowSec();
+        drawFrom = (int)game.waste.size() - n;  // the n newest waste cards animate in
+        drawEnd = (n - 1) * kDealStagger + kDealDur;
     }
 
     // Hit-test the board (not UI). Fills press* and returns true on a grabbable card.
@@ -293,7 +306,7 @@ struct App {
     }
 
     void maybeAutoMove() {
-        if (lift.active || dealing) return;
+        if (lift.active || dealing || drawing) return;
         auto mv = game.findAutoMove();
         if (!mv) return;
         Card c = mv->card;
@@ -375,13 +388,15 @@ struct App {
             setMuted(!stats.muted);
             return;
         }
-        if (dealing || (lift.active && !lift.followPointer)) return;  // animating/dealing
+        if (dealing || drawing || (lift.active && !lift.followPointer)) return;  // animating
 
         if (!game.stock.empty() && inRect(x, y, layout.stock)) {
-            game.draw3();
-            audio.play(Sfx::Flip);
-            gameDirty = true;
-            maybeAutoMove();
+            int n = game.draw3();
+            if (n > 0) {
+                audio.play(Sfx::Flip);
+                startDrawAnim(n);  // auto-mover runs once the cards finish flying in
+                gameDirty = true;
+            }
             return;
         }
 
@@ -480,8 +495,20 @@ struct App {
         // Waste: the entire pile spills rightward (wrapping to a 2nd row) so every
         // card can be read.
         rr.drawSlot(layout.waste);
-        for (int k = 0; k < (int)game.waste.size(); ++k)
-            rr.drawCard(wasteCardRect(layout, k), game.waste[k]);
+        const float drawEl = nowSec() - drawStart;
+        for (int k = 0; k < (int)game.waste.size(); ++k) {
+            SDL_FRect dst = wasteCardRect(layout, k);
+            if (drawing && k >= drawFrom) {
+                float reveal = (k - drawFrom) * kDealStagger;
+                if (drawEl < reveal) continue;  // still in the stock
+                if (drawEl < reveal + kDealDur) {
+                    float u = smoothstep((drawEl - reveal) / kDealDur);
+                    dst.x = lerp(layout.stock.x, dst.x, u);
+                    dst.y = lerp(layout.stock.y, dst.y, u);
+                }
+            }
+            rr.drawCard(dst, game.waste[k]);
+        }
 
         // Tableau (during the deal each card flies in from the stock).
         const float el = nowSec() - dealStart;
@@ -557,6 +584,11 @@ struct App {
             dealing = false;
             maybeAutoMove();  // nothing eligible at deal time, but stay consistent
         }
+        if (drawing && nowSec() - drawStart > drawEnd) {
+            drawing = false;
+            maybeAutoMove();  // a newly drawn top card may now auto-advance
+            checkWin();
+        }
 
         if (lift.active && !lift.followPointer) {
             lift.t += dt;
@@ -573,7 +605,7 @@ struct App {
         }
 
         // Persist the game once it settles (no drag/animation/deal in flight).
-        if (gameDirty && !lift.active && !dealing && !won) {
+        if (gameDirty && !lift.active && !dealing && !drawing && !won) {
             persist();
         }
         draw();
