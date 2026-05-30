@@ -92,7 +92,11 @@ int Game::minOppositeColorInPlay(Suit s) const {
 
 bool Game::autoEligible(Card c) const {
     if (!foundationReady(c)) return false;
-    if (c.rank == 1) return true;  // Aces have no holding utility
+    // Aces and twos are always safe once foundation-ready: an ace holds nothing,
+    // and the only card a two can hold is an ace -- which always auto-advances
+    // and so never needs to sit on the two. (Threes and up stay conservative,
+    // since a two can be stuck in play while its ace isn't up yet.)
+    if (c.rank <= 2) return true;
     int m = minOppositeColorInPlay(c.suit);
     if (m == std::numeric_limits<int>::max()) return true;  // nothing left to hold
     // Keep this card while an opposite-color card of rank (c.rank - 1) is still

@@ -63,6 +63,17 @@ int main() {
     // Ace is always eligible once its foundation is ready (here, empty).
     CHECK(a.autoEligible(C(Suit::Hearts, 1)));
 
+    // A two is always eligible once its ace is up, even while the opposite-color
+    // aces are still in play -- the only thing a two holds is an ace, which
+    // always auto-advances.
+    a.foundation = {0, 0, 1, 0};  // S=1 (2S ready); red aces NOT up yet
+    CHECK(a.foundationReady(C(Suit::Spades, 2)));
+    CHECK(a.minOppositeColorInPlay(Suit::Spades) == 1);  // red aces in play
+    CHECK(a.autoEligible(C(Suit::Spades, 2)));
+    // ...but a two whose own ace isn't up yet still can't go (foundation rule).
+    a.foundation = {0, 0, 0, 0};
+    CHECK(!a.autoEligible(C(Suit::Spades, 2)));
+
     // Black 3 ready on its foundation, with red 2s still in play -> must stay.
     a.foundation = {1, 1, 2, 0};  // H=1, D=1 (so red 2s in play), S=2 (3S ready)
     CHECK(a.foundationReady(C(Suit::Spades, 3)));
