@@ -431,11 +431,12 @@ void Renderer::drawCard(SDL_FRect rc, Card card, bool highlight) {
     const float px = rc.h * 0.20f;
     const char* rs = rankString(card.rank);
 
-    // Top-left corner: rank over a small pip centred under it.
+    // Top-left corner: rank over a small pip centred under it. Match the top
+    // inset to the left inset so the rank sits balanced in the corner.
     float pad = rc.w * 0.08f;
-    drawText(rc.x + pad, rc.y + pad * 0.6f, px, c, rs);
-    drawSuit(card.suit, rc.x + pad + textWidth(px, rs) * 0.5f, rc.y + pad * 0.6f + px + rc.h * 0.045f,
-             rc.h * 0.10f);
+    float topY = rc.y + pad;
+    drawText(rc.x + pad, topY, px, c, rs);
+    drawSuit(card.suit, rc.x + pad + textWidth(px, rs) * 0.5f, topY + px + rc.h * 0.045f, rc.h * 0.10f);
 
     // Large central pip.
     drawSuit(card.suit, rc.x + rc.w * 0.5f, rc.y + rc.h * 0.55f, rc.h * 0.34f);
