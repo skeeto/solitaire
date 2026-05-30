@@ -46,4 +46,22 @@ python3 -m http.server -d build-web 8000
 
 The build emits `index.html` / `index.js` / `index.wasm` plus the PWA support
 files (`manifest.webmanifest`, `sw.js`, icons), so the page is installable and
-works offline after the first load.
+works offline after the first load. The service worker's cache name is stamped
+with a hash of the wasm at build time, so each deploy supersedes the old cache.
+Deploy by copying the contents of `build-web/` to any static HTTPS host (e.g.
+GitHub Pages).
+
+## Licenses
+
+This project's own code is released into the public domain (see `UNLICENSE`).
+It bundles the following third-party components, whose licenses must accompany
+binary distributions:
+
+- **SDL3** — zlib license (statically linked). <https://www.libsdl.org/>
+- **Inter** (embedded font subset, `src/font_data.h`) — SIL Open Font License
+  1.1. Copyright The Inter Project Authors. Full text in
+  `assets/Inter-LICENSE.txt`.
+- **stb_truetype** (`third_party/stb_truetype.h`) — public domain.
+
+The rules and presentation reimplement *Sawayama Solitaire* by Zachtronics; this
+is an independent fan project and is not affiliated with or endorsed by them.

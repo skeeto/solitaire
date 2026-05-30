@@ -1,5 +1,7 @@
 // Cache-first service worker: makes the game load offline and installable.
-const CACHE = 'sawayama-v1';
+// @CACHE_VERSION@ is replaced at build time with a hash of the wasm so each
+// deploy uses a fresh cache (see cmake/stamp_sw.cmake).
+const CACHE = 'sawayama-@CACHE_VERSION@';
 const ASSETS = [
   './',
   'index.html',

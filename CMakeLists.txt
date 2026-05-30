@@ -46,14 +46,42 @@ if(EMSCRIPTEN)
         "-sENVIRONMENT=web"
         "SHELL:--shell-file ${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
     )
-    # Place the PWA support files next to the generated index.{html,js,wasm}.
+    # Place the PWA support files next to the generated index.{html,js,wasm},
+    # and stamp the service worker's cache name with a hash of the wasm so each
+    # deploy invalidates the previous cache.
     add_custom_command(TARGET solitaire POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_CURRENT_SOURCE_DIR}/web/manifest.webmanifest
-            ${CMAKE_CURRENT_SOURCE_DIR}/web/sw.js
             ${CMAKE_CURRENT_SOURCE_DIR}/web/icon-192.png
             ${CMAKE_CURRENT_SOURCE_DIR}/web/icon-512.png
             $<TARGET_FILE_DIR:solitaire>
+        COMMAND ${CMAKE_COMMAND}
+            -DSW_IN=${CMAKE_CURRENT_SOURCE_DIR}/web/sw.js
+            -DWASM=$<TARGET_FILE_DIR:solitaire>/index.wasm
+            -DOUT=$<TARGET_FILE_DIR:solitaire>/sw.js
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/stamp_sw.cmake
         VERBATIM
     )
+endif()
+
+# --- Native window icon and platform packaging ---
+if(WIN32)
+    set(ICON_ICO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.ico")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/app.rc.in ${CMAKE_BINARY_DIR}/app.rc @ONLY)
+    target_sources(solitaire PRIVATE ${CMAKE_BINARY_DIR}/app.rc)
+    set_target_properties(solitaire PROPERTIES WIN32_EXECUTABLE TRUE)  # GUI subsystem (no console)
+endif()
+
+if(APPLE AND NOT EMSCRIPTEN)
+    set_target_properties(solitaire PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Sawayama Solitaire"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.wellons.sawayamasolitaire"
+        MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
+        MACOSX_BUNDLE_ICON_FILE "icon.icns"
+    )
+    target_sources(solitaire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.icns)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
 endif()

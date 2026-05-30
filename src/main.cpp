@@ -3,6 +3,8 @@
 #include <SDL3/SDL_main.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#else
+#include "icon_data.h"  // embedded window icon (native only)
 #endif
 
 #include <algorithm>
@@ -628,6 +630,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
         return SDL_APP_FAILURE;
     }
     SDL_SetRenderVSync(app->sdl, 1);
+#ifndef __EMSCRIPTEN__
+    if (SDL_Surface* ic = SDL_CreateSurfaceFrom(kIconW, kIconH, SDL_PIXELFORMAT_RGBA32,
+                                                (void*)kIconRGBA, kIconW * 4)) {
+        SDL_SetWindowIcon(app->window, ic);
+        SDL_DestroySurface(ic);
+    }
+#endif
     app->rr.init(app->sdl);
     app->curArrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     app->curHand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
