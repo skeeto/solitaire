@@ -8,6 +8,17 @@
 #include "font_data.h"     // embedded Inter (Regular) subset
 #include "stb_truetype.h"  // declarations; implementation lives in stb_impl.cpp
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+// SDL3's web backend doesn't surface iOS Safari's env(safe-area-inset-*); read
+// the values the shell exposes as CSS variables on :root, converted from CSS
+// (logical) pixels to the device pixels the layout works in.
+EM_JS(double, sai_inset, (const char* prop), {
+    var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(UTF8ToString(prop))) || 0;
+    return v * (window.devicePixelRatio || 1);
+});
+#endif
+
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kCardAspect = 1.42f;  // height / width
@@ -144,7 +155,7 @@ static void computeWaste(Layout& L, float availWasteW, int count) {
     L.wastePerRow = std::max(1, perRow);
 }
 
-Layout computeLayout(float w, float h, int wasteCount) {
+static Layout layoutCore(float w, float h, int wasteCount) {
     Layout L;
     L.vertical = h > w;
     const float margin = std::max(8.0f, std::min(w, h) * 0.02f);
@@ -231,6 +242,33 @@ Layout computeLayout(float w, float h, int wasteCount) {
             L.tableau[col] = SDL_FRect{rightX + col * (L.cardW + colGap), tabTop, L.cardW, L.cardH};
         L.fanY = fanForHeight(L.cardH, h - tabTop - margin);
     }
+    return L;
+}
+
+static void offsetLayout(Layout& L, float dx, float dy) {
+    auto sh = [&](SDL_FRect& r) { r.x += dx; r.y += dy; };
+    sh(L.stock);
+    sh(L.waste);
+    for (auto& f : L.foundations) sh(f);
+    for (auto& t : L.tableau) sh(t);
+    sh(L.redealBtn);
+    sh(L.muteBtn);
+    sh(L.winsAnchor);
+}
+
+Layout computeLayout(float w, float h, int wasteCount) {
+    // Inset the playfield by the platform safe area (iOS status bar / home
+    // indicator when launched as a standalone PWA). The background still fills
+    // the whole canvas; only the content is inset. Zero everywhere else.
+    float insT = 0, insB = 0, insL = 0, insR = 0;
+#ifdef __EMSCRIPTEN__
+    insT = (float)sai_inset("--sai-top");
+    insB = (float)sai_inset("--sai-bottom");
+    insL = (float)sai_inset("--sai-left");
+    insR = (float)sai_inset("--sai-right");
+#endif
+    Layout L = layoutCore(w - insL - insR, h - insT - insB, wasteCount);
+    if (insL != 0 || insT != 0) offsetLayout(L, insL, insT);
     return L;
 }
 
