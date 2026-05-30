@@ -7,6 +7,10 @@ sound effects are synthesized at runtime, so SDL3 is the only third-party
 library; text uses the bundled single-header [`stb_truetype`](third_party/stb_truetype.h)
 with a small embedded **Inter** subset (SIL OFL 1.1 — see [assets/](assets/README.md)).
 
+[**Play Solitaire on your browser**](https://nullprogram.com/solitaire/)
+
+![](docs/screenshot.png)
+
 See [docs/sawayama-solitaire.md](docs/sawayama-solitaire.md) for the full rules.
 
 ## How to play
