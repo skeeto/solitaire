@@ -5,14 +5,95 @@
 #include <cstring>
 #include <vector>
 
+#include "font_data.h"     // embedded Inter (Regular) subset
+#include "stb_truetype.h"  // declarations; implementation lives in stb_impl.cpp
+
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
-constexpr float kCardAspect = 1.42f;     // height / width
-constexpr float kDebugGlyph = 8.0f;      // SDL debug font cell size, px
+constexpr float kCardAspect = 1.42f;  // height / width
 
 SDL_FColor red() { return rgba(196, 30, 48); }
 SDL_FColor black() { return rgba(28, 28, 38); }
 }  // namespace
+
+// Antialiased TrueType text: the embedded font is baked once into a glyph atlas
+// texture; strings draw as textured quads tinted to the requested color and
+// scaled (with linear filtering) so they stay smooth at any size.
+class GlyphFont {
+public:
+    bool init(SDL_Renderer* r) {
+        r_ = r;
+        atlasW_ = atlasH_ = 1024;
+        std::vector<unsigned char> alpha((size_t)atlasW_ * atlasH_, 0);
+        stbtt_pack_context pc;
+        if (!stbtt_PackBegin(&pc, alpha.data(), atlasW_, atlasH_, 0, 1, nullptr)) return false;
+        stbtt_PackSetOversampling(&pc, 2, 2);
+        stbtt_PackFontRange(&pc, kFontTTF, 0, bakePx_, 32, 95, packed_);
+        stbtt_PackEnd(&pc);
+
+        stbtt_fontinfo info;
+        stbtt_InitFont(&info, kFontTTF, stbtt_GetFontOffsetForIndex(kFontTTF, 0));
+        int asc = 0, desc = 0, gap = 0;
+        stbtt_GetFontVMetrics(&info, &asc, &desc, &gap);
+        ascentBaked_ = asc * stbtt_ScaleForPixelHeight(&info, bakePx_);
+
+        std::vector<unsigned char> rgba((size_t)atlasW_ * atlasH_ * 4);
+        for (size_t i = 0; i < (size_t)atlasW_ * atlasH_; ++i) {
+            rgba[i * 4 + 0] = 255;
+            rgba[i * 4 + 1] = 255;
+            rgba[i * 4 + 2] = 255;
+            rgba[i * 4 + 3] = alpha[i];
+        }
+        atlas_ = SDL_CreateTexture(r_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, atlasW_, atlasH_);
+        if (!atlas_) return false;
+        SDL_UpdateTexture(atlas_, nullptr, rgba.data(), atlasW_ * 4);
+        SDL_SetTextureBlendMode(atlas_, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(atlas_, SDL_SCALEMODE_LINEAR);
+        return true;
+    }
+
+    void destroy() {
+        if (atlas_) SDL_DestroyTexture(atlas_);
+        atlas_ = nullptr;
+    }
+
+    float width(float px, const char* s) const {
+        float w = 0;
+        for (; *s; ++s) {
+            int c = (unsigned char)*s;
+            if (c < 32 || c >= 127) c = 32;
+            w += packed_[c - 32].xadvance;
+        }
+        return w * (px / bakePx_);
+    }
+
+    float height(float px) const { return ascentBaked_ * (px / bakePx_); }
+
+    void draw(float x, float y, float px, SDL_FColor col, const char* s) {
+        if (!atlas_) return;
+        float scale = px / bakePx_;
+        SDL_SetTextureColorModFloat(atlas_, col.r, col.g, col.b);
+        SDL_SetTextureAlphaModFloat(atlas_, col.a);
+        float cx = 0, cy = ascentBaked_;
+        for (; *s; ++s) {
+            int c = (unsigned char)*s;
+            if (c < 32 || c >= 127) c = 32;
+            stbtt_aligned_quad q;
+            stbtt_GetPackedQuad(packed_, atlasW_, atlasH_, c - 32, &cx, &cy, &q, 0);
+            SDL_FRect src{q.s0 * atlasW_, q.t0 * atlasH_, (q.s1 - q.s0) * atlasW_, (q.t1 - q.t0) * atlasH_};
+            SDL_FRect dst{x + q.x0 * scale, y + q.y0 * scale, (q.x1 - q.x0) * scale, (q.y1 - q.y0) * scale};
+            SDL_RenderTexture(r_, atlas_, &src, &dst);
+        }
+    }
+
+private:
+    SDL_Renderer* r_ = nullptr;
+    SDL_Texture* atlas_ = nullptr;
+    float bakePx_ = 48.0f;
+    float ascentBaked_ = 0;
+    int atlasW_ = 0, atlasH_ = 0;
+    stbtt_packedchar packed_[95];
+};
 
 const char* rankString(int rank) {
     static const char* names[] = {"",  "A", "2", "3", "4",  "5", "6",
@@ -70,9 +151,9 @@ Layout computeLayout(float w, float h, int wasteCount) {
         const float gap = std::max(4.0f, w * 0.012f);
         L.cardW = (w - 2 * margin - 6 * gap) / 7.0f;
         L.cardH = L.cardW * kCardAspect;
-        L.uiTextScale = std::max(1.5f, L.cardH * 0.040f);
+        L.uiTextPx = std::max(12.0f, L.cardH * 0.32f);
 
-        const float winsH = kDebugGlyph * L.uiTextScale;
+        const float winsH = L.uiTextPx;
         const float btnH = std::max(22.0f, L.cardH * 0.34f);
         const float headerH = winsH + gap + btnH + gap;
 
@@ -108,7 +189,7 @@ Layout computeLayout(float w, float h, int wasteCount) {
         const float colFanBound = (h - 2 * margin) / 8.3f;  // room for a ~12-card fan + waste band
         L.cardW = std::min(widthBound, colFanBound);
         L.cardH = L.cardW * kCardAspect;
-        L.uiTextScale = std::max(1.5f, L.cardH * 0.040f);
+        L.uiTextPx = std::max(12.0f, L.cardH * 0.32f);
 
         const float fgap = L.cardH * 0.12f;
         const float colGap = L.cardW * 0.35f;  // breathing room between columns
@@ -121,14 +202,15 @@ Layout computeLayout(float w, float h, int wasteCount) {
             L.foundations[i] = SDL_FRect{margin, fTop + i * (L.cardH + fgap), L.cardW, L.cardH};
 
         // Wins counter + buttons cluster, top-right.
-        const float winsH = kDebugGlyph * L.uiTextScale;
+        const float winsH = L.uiTextPx;
         const float btnH = std::max(22.0f, L.cardH * 0.30f);
         const float redealW = L.cardW * 1.6f;
         L.winsAnchor = SDL_FRect{w - margin, margin, 0, 0};
         const float btnTop = margin + winsH + margin * 0.6f;
         L.redealBtn = SDL_FRect{w - margin - redealW, btnTop, redealW, btnH};
         L.muteBtn = SDL_FRect{L.redealBtn.x - margin * 0.6f - btnH, btnTop, btnH, btnH};
-        const float clusterW = std::max(redealW + margin + btnH, 10 * kDebugGlyph * L.uiTextScale);
+        // Reserve room for the wins text (~10 chars) and the button row.
+        const float clusterW = std::max(redealW + margin + btnH, 10.0f * L.uiTextPx * 0.62f);
         const float clusterLeft = w - margin - clusterW;
 
         const float rightX = margin + L.cardW + bigPad;
@@ -150,7 +232,21 @@ Layout computeLayout(float w, float h, int wasteCount) {
 bool Renderer::init(SDL_Renderer* r) {
     r_ = r;
     SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
+    font_ = new GlyphFont();
+    if (!font_->init(r_)) {
+        SDL_Log("font: failed to build glyph atlas");
+        delete font_;
+        font_ = nullptr;
+    }
     return true;
+}
+
+void Renderer::shutdown() {
+    if (font_) {
+        font_->destroy();
+        delete font_;
+        font_ = nullptr;
+    }
 }
 
 void Renderer::clear(SDL_FColor c) {
@@ -273,14 +369,14 @@ void Renderer::drawCard(SDL_FRect rc, Card card, bool highlight) {
 
     const SDL_FColor c = isRed(card.suit) ? red() : black();
     // Compact corner index so a small fan/overlap still reveals rank + suit.
-    const float scale = std::max(1.0f, rc.h * 0.020f);
+    const float px = rc.h * 0.17f;
     const char* rs = rankString(card.rank);
 
-    // Top-left corner: rank over a small pip.
-    float pad = rc.w * 0.06f;
-    drawText(rc.x + pad, rc.y + pad, scale, c, rs);
-    drawSuit(card.suit, rc.x + pad + kDebugGlyph * scale * 0.5f,
-             rc.y + pad + kDebugGlyph * scale + rc.h * 0.06f, rc.h * 0.10f);
+    // Top-left corner: rank over a small pip centred under it.
+    float pad = rc.w * 0.08f;
+    drawText(rc.x + pad, rc.y + pad * 0.6f, px, c, rs);
+    drawSuit(card.suit, rc.x + pad + textWidth(px, rs) * 0.5f, rc.y + pad * 0.6f + px + rc.h * 0.05f,
+             rc.h * 0.095f);
 
     // Large central pip.
     drawSuit(card.suit, rc.x + rc.w * 0.5f, rc.y + rc.h * 0.55f, rc.h * 0.34f);
@@ -326,20 +422,15 @@ void Renderer::drawSlot(SDL_FRect rc, bool freecell) {
     fillRoundedRect(inner, radius - border, rgba(11, 84, 62));
 }
 
-void Renderer::drawText(float x, float y, float scale, SDL_FColor c, const char* str) {
-    SDL_SetRenderDrawColorFloat(r_, c.r, c.g, c.b, c.a);
-    float sx, sy;
-    SDL_GetRenderScale(r_, &sx, &sy);
-    SDL_SetRenderScale(r_, scale, scale);
-    SDL_RenderDebugText(r_, x / scale, y / scale, str);
-    SDL_SetRenderScale(r_, sx, sy);
+void Renderer::drawText(float x, float y, float px, SDL_FColor c, const char* str) {
+    if (font_) font_->draw(x, y, px, c, str);
 }
 
-float Renderer::textWidth(float scale, const char* str) const {
-    return std::strlen(str) * kDebugGlyph * scale;
+float Renderer::textWidth(float px, const char* str) const {
+    return font_ ? font_->width(px, str) : 0.0f;
 }
 
-float Renderer::textHeight(float scale) const { return kDebugGlyph * scale; }
+float Renderer::textHeight(float px) const { return font_ ? font_->height(px) : px; }
 
 void Renderer::drawSpeaker(SDL_FRect rc, bool muted, SDL_FColor c) {
     // Speaker body (small rect) + cone (triangle) centred in the button.

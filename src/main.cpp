@@ -421,8 +421,14 @@ struct App {
     // --- drawing ---
     void drawButton(const SDL_FRect& r, const char* label) {
         rr.fillRoundedRect(r, r.h * 0.25f, rgba(34, 120, 92));
-        float s = std::min(layout.uiTextScale, (r.w * 0.84f) / (std::strlen(label) * 8.0f));
-        float tw = rr.textWidth(s, label), th = rr.textHeight(s);
+        float s = layout.uiTextPx;
+        float maxW = r.w * 0.84f;
+        float tw = rr.textWidth(s, label);
+        if (tw > maxW) {
+            s *= maxW / tw;
+            tw = maxW;
+        }
+        float th = rr.textHeight(s);
         rr.drawText(r.x + (r.w - tw) * 0.5f, r.y + (r.h - th) * 0.5f, s, rgba(240, 248, 244), label);
     }
 
@@ -482,7 +488,7 @@ struct App {
         // UI: wins counter (top-right), buttons.
         char buf[64];
         std::snprintf(buf, sizeof(buf), "WINS %d", stats.wins);
-        float ws = layout.uiTextScale;
+        float ws = layout.uiTextPx;
         rr.drawText(layout.winsAnchor.x - rr.textWidth(ws, buf), layout.winsAnchor.y, ws,
                     rgba(245, 245, 235), buf);
         drawButton(layout.redealBtn, "RE-DEAL");
@@ -508,13 +514,13 @@ struct App {
         if (won) {
             float w = outW, h = outH;
             rr.fillRect(SDL_FRect{0, 0, w, h}, rgba(0, 0, 0, 150));
-            float s = std::max(3.0f, layout.cardH * 0.06f);
+            float s = std::max(24.0f, layout.cardH * 0.42f);
             const char* msg = "YOU WIN!";
             rr.drawText((w - rr.textWidth(s, msg)) * 0.5f, h * 0.5f - rr.textHeight(s),
                         s, rgba(255, 230, 130), msg);
             const char* sub = "PRESS RE-DEAL TO PLAY AGAIN";
-            float s2 = std::max(1.5f, layout.cardH * 0.026f);
-            rr.drawText((w - rr.textWidth(s2, sub)) * 0.5f, h * 0.5f + rr.textHeight(s),
+            float s2 = std::max(12.0f, layout.cardH * 0.20f);
+            rr.drawText((w - rr.textWidth(s2, sub)) * 0.5f, h * 0.5f + rr.textHeight(s) * 0.6f,
                         s2, rgba(230, 230, 230), sub);
         }
 
@@ -636,6 +642,7 @@ void SDL_AppQuit(void* appstate, SDL_AppResult) {
     App* app = static_cast<App*>(appstate);
     if (app) {
         app->audio.shutdown();
+        app->rr.shutdown();  // free the font atlas before destroying the renderer
         if (app->sdl) SDL_DestroyRenderer(app->sdl);
         if (app->window) SDL_DestroyWindow(app->window);
         delete app;

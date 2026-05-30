@@ -3,7 +3,9 @@
 A clone of Zachtronics' **Sawayama Solitaire** (the single-pass Klondike variant
 from *Last Call BBS*), built in C++20 with SDL3. It runs natively on desktop and
 on the web as an installable PWA. Rendering is procedural (no image assets) and
-sound effects are synthesized at runtime, so the only dependency is SDL3 itself.
+sound effects are synthesized at runtime, so SDL3 is the only third-party
+library; text uses the bundled single-header [`stb_truetype`](third_party/stb_truetype.h)
+with a small embedded **Inter** subset (SIL OFL 1.1 — see [assets/](assets/README.md)).
 
 See [docs/sawayama-solitaire.md](docs/sawayama-solitaire.md) for the full rules.
 

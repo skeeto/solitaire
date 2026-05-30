@@ -33,7 +33,9 @@ add_executable(solitaire
     src/render.cpp
     src/audio.cpp
     src/storage.cpp
+    src/stb_impl.cpp
 )
+target_include_directories(solitaire PRIVATE third_party)
 target_link_libraries(solitaire PRIVATE SDL3::SDL3-static)
 
 if(EMSCRIPTEN)

@@ -23,7 +23,7 @@ struct Layout {
     SDL_FRect redealBtn{};
     SDL_FRect muteBtn{};
     SDL_FRect winsAnchor{};  // top-right point for the wins text (w=h=0)
-    float uiTextScale = 2.0f;
+    float uiTextPx = 16.0f;  // UI text pixel height
 };
 
 Layout computeLayout(float w, float h, int wasteCount);
@@ -40,9 +40,12 @@ inline SDL_FColor rgba(int r, int g, int b, int a = 255) {
 
 const char* rankString(int rank);
 
+class GlyphFont;  // antialiased TrueType font, defined in render.cpp
+
 class Renderer {
 public:
     bool init(SDL_Renderer* r);
+    void shutdown();  // free the font atlas before the SDL renderer is destroyed
 
     void clear(SDL_FColor c);
     void fillRect(SDL_FRect rc, SDL_FColor c);
@@ -55,9 +58,11 @@ public:
     void drawSuit(Suit s, float cx, float cy, float size);
     void drawSuit(Suit s, float cx, float cy, float size, SDL_FColor color);
 
-    void drawText(float x, float y, float scale, SDL_FColor c, const char* str);
-    float textWidth(float scale, const char* str) const;
-    float textHeight(float scale) const;
+    // Text. `px` is the cap/line pixel height; glyphs are antialiased and smooth
+    // at any size. (x, y) is the top-left of the text box.
+    void drawText(float x, float y, float px, SDL_FColor c, const char* str);
+    float textWidth(float px, const char* str) const;
+    float textHeight(float px) const;
 
     void drawSpeaker(SDL_FRect rc, bool muted, SDL_FColor c);
 
@@ -67,5 +72,6 @@ private:
     void drawCircle(float cx, float cy, float radius, SDL_FColor c);
     void fillConvex(const SDL_FPoint* pts, int n, SDL_FColor c);
 
+    GlyphFont* font_ = nullptr;
     SDL_Renderer* r_ = nullptr;
 };
