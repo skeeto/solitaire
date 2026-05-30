@@ -363,6 +363,10 @@ struct App {
     }
 
     void onPointerDown(float x, float y) {
+        if (won) {  // win overlay is a full-screen modal: tap anywhere to play again
+            redeal();
+            return;
+        }
         if (inRect(x, y, layout.redealBtn)) {
             redeal();
             return;
@@ -371,7 +375,7 @@ struct App {
             setMuted(!stats.muted);
             return;
         }
-        if (won || dealing || (lift.active && !lift.followPointer)) return;  // animating/dealing
+        if (dealing || (lift.active && !lift.followPointer)) return;  // animating/dealing
 
         if (!game.stock.empty() && inRect(x, y, layout.stock)) {
             game.draw3();
@@ -395,9 +399,9 @@ struct App {
     }
 
     void onPointerMove(float x, float y) {
-        // Hand cursor over the clickable buttons.
+        // Hand cursor over the buttons (or anywhere while the win modal is up).
         bool overBtn = inRect(x, y, layout.redealBtn) || inRect(x, y, layout.muteBtn);
-        setHoverCursor(overBtn && !lift.active);
+        setHoverCursor(won || (overBtn && !lift.active));
 
         if (lift.active && lift.followPointer) {
             lift.px = x;
@@ -529,10 +533,10 @@ struct App {
             float w = outW, h = outH;
             rr.fillRect(SDL_FRect{0, 0, w, h}, rgba(0, 0, 0, 150));
             float s = std::max(24.0f, layout.cardH * 0.42f);
-            const char* msg = "YOU WIN!";
+            const char* msg = "You win!";
             rr.drawText((w - rr.textWidth(s, msg)) * 0.5f, h * 0.5f - rr.textHeight(s),
                         s, rgba(255, 230, 130), msg);
-            const char* sub = "Press Re-deal to play again";
+            const char* sub = "Tap to play again";
             float s2 = std::max(12.0f, layout.cardH * 0.20f);
             rr.drawText((w - rr.textWidth(s2, sub)) * 0.5f, h * 0.5f + rr.textHeight(s) * 0.6f,
                         s2, rgba(230, 230, 230), sub);
