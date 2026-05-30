@@ -397,10 +397,19 @@ void Renderer::drawSuit(Suit s, float cx, float cy, float size, SDL_FColor c) {
         case Suit::Hearts:
             heart(1.0f);
             break;
-        case Suit::Spades:
-            heart(-1.0f);                                  // inverted-heart body
-            tri(0.0f, 0.20f, -0.20f, 0.55f, 0.20f, 0.55f);  // flared stem
+        case Suit::Spades: {
+            heart(-1.0f);  // inverted-heart body
+            // Flared trunk that extends below the body and forks slightly at the
+            // foot so the handle reads as its own element.
+            SDL_FPoint stem[4] = {
+                {cx, cy + 0.14f * size},                  // neck (into the body)
+                {cx + 0.28f * size, cy + 0.62f * size},   // right foot
+                {cx, cy + 0.50f * size},                  // forked notch between the feet
+                {cx - 0.28f * size, cy + 0.62f * size},   // left foot
+            };
+            fillConvex(stem, 4, c);
             break;
+        }
         case Suit::Clubs:
             circ(0.0f, -0.24f, 0.24f);
             circ(-0.25f, 0.10f, 0.24f);
