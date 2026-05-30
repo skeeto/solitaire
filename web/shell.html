@@ -10,11 +10,23 @@
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>Sawayama Solitaire</title>
   <style>
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
-                 background: #0b543e; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+      background: #0b543e;
+      overscroll-behavior: none;
+      /* Pinch yes, pan and double-tap-zoom no. Combined with the preventDefault
+         override below, this lets the browser engage compositor pinch (e.g. iOS
+         Safari's pinch-to-show-tabs / overview) while in-page zoom stays
+         disabled (maximum-scale=1, user-scalable=no). */
+      touch-action: pinch-zoom;
+      -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+    }
     body { position: fixed; inset: 0; }
+    /* SDL sets touch-action:none inline on the canvas; !important overrides it
+       so the browser keeps pinch gesture recognition. */
     canvas#canvas { display: block; width: 100%; height: 100%; outline: none;
-                    touch-action: none; }
+                    touch-action: pinch-zoom !important; }
     #loading { position: absolute; inset: 0; display: flex; align-items: center;
                justify-content: center; color: #cfe9df; font: 16px system-ui, sans-serif; }
   </style>
@@ -23,18 +35,74 @@
   <div id="loading">Loading…</div>
   <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
   <script>
-    var Module = {
-      canvas: document.getElementById('canvas'),
-      onRuntimeInitialized: function () {
-        var l = document.getElementById('loading');
-        if (l) l.remove();
+    (function () {
+      // Neutralize preventDefault() for touch events so the browser can engage
+      // compositor-level pinch recognition. SDL3's Emscripten wrapper calls
+      // e.preventDefault() on touch pointer events, which would otherwise block
+      // it. Patching Event.prototype catches every call site; must run before
+      // the Emscripten loader is evaluated.
+      var origPreventDefault = Event.prototype.preventDefault;
+      Event.prototype.preventDefault = function () {
+        if (this.pointerType === 'touch') return;   // PointerEvent (touch)
+        if (this.touches !== undefined) return;      // TouchEvent
+        return origPreventDefault.call(this);
+      };
+
+      var canvas = document.getElementById('canvas');
+
+      // When a second finger lands, cancel any in-flight drag and hide the rest
+      // of this gesture from SDL3, so a pinch isn't interpreted as drags/taps
+      // and the browser takes over the gesture.
+      var activeTouchPointers = new Set();
+      var multiTouchActive = false;
+      function multiTouchFilter(e) {
+        if (e.pointerType !== 'touch') return;
+        if (e.type === 'pointerdown') {
+          activeTouchPointers.add(e.pointerId);
+          if (activeTouchPointers.size >= 2 && !multiTouchActive) {
+            activeTouchPointers.forEach(function (id) {
+              if (id !== e.pointerId) {
+                canvas.dispatchEvent(new PointerEvent('pointercancel', {
+                  pointerId: id, pointerType: 'touch', bubbles: true, cancelable: true,
+                }));
+              }
+            });
+            multiTouchActive = true;
+          }
+          if (multiTouchActive) e.stopImmediatePropagation();
+          return;
+        }
+        if (e.type === 'pointermove') {
+          if (multiTouchActive) e.stopImmediatePropagation();
+          return;
+        }
+        if (e.type === 'pointerup' || e.type === 'pointercancel') {
+          activeTouchPointers.delete(e.pointerId);
+          if (multiTouchActive) {
+            e.stopImmediatePropagation();
+            if (activeTouchPointers.size === 0) multiTouchActive = false;
+          }
+          return;
+        }
       }
-    };
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js').catch(function () {});
+      ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach(function (t) {
+        window.addEventListener(t, multiTouchFilter, {capture: true});
       });
-    }
+
+      window.Module = {
+        canvas: canvas,
+        onRuntimeInitialized: function () {
+          var l = document.getElementById('loading');
+          if (l) l.remove();
+        }
+      };
+
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('sw.js').catch(function () {});
+        });
+      }
+    })();
   </script>
   {{{ SCRIPT }}}
 </body>
