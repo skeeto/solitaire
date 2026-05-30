@@ -336,6 +336,34 @@ void Renderer::fillRoundedRect(SDL_FRect rc, float radius, SDL_FColor c) {
     fillConvex(pts.data(), (int)pts.size(), c);
 }
 
+// Classic parametric heart curve, sampled once into a single closed outline and
+// normalized to a unit (height = 1) box centred on its bounding box. Drawing it
+// as one polygon avoids the tangent/seam artifacts of a circles-plus-triangle
+// construction; the spade reuses it vertically flipped.
+static const std::vector<SDL_FPoint>& heartUnit() {
+    static const std::vector<SDL_FPoint> pts = [] {
+        const int N = 72;
+        std::vector<SDL_FPoint> raw(N);
+        float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+        for (int i = 0; i < N; ++i) {
+            float t = 2.0f * kPi * i / N;
+            float x = 16.0f * std::pow(std::sin(t), 3.0f);
+            float y = -(13.0f * std::cos(t) - 5.0f * std::cos(2 * t) - 2.0f * std::cos(3 * t) -
+                        std::cos(4 * t));  // negate: point sits at the bottom in screen space
+            raw[i] = {x, y};
+            minx = std::min(minx, x);
+            maxx = std::max(maxx, x);
+            miny = std::min(miny, y);
+            maxy = std::max(maxy, y);
+        }
+        float ccx = (minx + maxx) * 0.5f, ccy = (miny + maxy) * 0.5f, sc = 1.0f / (maxy - miny);
+        std::vector<SDL_FPoint> p(N);
+        for (int i = 0; i < N; ++i) p[i] = {(raw[i].x - ccx) * sc, (raw[i].y - ccy) * sc};
+        return p;
+    }();
+    return pts;
+}
+
 void Renderer::drawSuit(Suit s, float cx, float cy, float size) {
     drawSuit(s, cx, cy, size, isRed(s) ? red() : black());
 }
@@ -348,6 +376,14 @@ void Renderer::drawSuit(Suit s, float cx, float cy, float size, SDL_FColor c) {
         fillConvex(p, 3, c);
     };
     auto circ = [&](float x, float y, float r) { drawCircle(cx + x * size, cy + y * size, r * size, c); };
+    // Heart outline scaled to `size`; flipY = -1 draws the spade body (inverted).
+    auto heart = [&](float flipY) {
+        const auto& u = heartUnit();
+        std::vector<SDL_FPoint> p(u.size());
+        for (size_t i = 0; i < u.size(); ++i)
+            p[i] = {cx + u[i].x * size, cy + u[i].y * size * flipY};
+        fillConvex(p.data(), (int)p.size(), c);
+    };
 
     switch (s) {
         case Suit::Diamonds: {
@@ -359,15 +395,11 @@ void Renderer::drawSuit(Suit s, float cx, float cy, float size, SDL_FColor c) {
             break;
         }
         case Suit::Hearts:
-            circ(-0.20f, -0.12f, 0.26f);
-            circ(0.20f, -0.12f, 0.26f);
-            tri(-0.45f, -0.04f, 0.45f, -0.04f, 0.0f, 0.52f);
+            heart(1.0f);
             break;
         case Suit::Spades:
-            tri(0.0f, -0.52f, -0.46f, 0.06f, 0.46f, 0.06f);
-            circ(-0.23f, 0.12f, 0.25f);
-            circ(0.23f, 0.12f, 0.25f);
-            tri(-0.17f, 0.50f, 0.17f, 0.50f, 0.0f, 0.06f);
+            heart(-1.0f);                                  // inverted-heart body
+            tri(0.0f, 0.20f, -0.20f, 0.55f, 0.20f, 0.55f);  // flared stem
             break;
         case Suit::Clubs:
             circ(0.0f, -0.24f, 0.24f);
