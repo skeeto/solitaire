@@ -130,12 +130,12 @@ struct App {
         drawing = false;
         lift = Lift{};
         havePress = false;
-        audio.play(Sfx::Shuffle);
         startDealAnim();
         persist();  // save the new deal immediately so a refresh resumes it
     }
 
     void startDealAnim() {
+        audio.play(Sfx::Shuffle);  // every deal (initial + re-deal) gets the shuffle
         dealing = true;
         dealStart = nowSec();
         int k = 0;
