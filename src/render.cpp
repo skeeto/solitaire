@@ -436,7 +436,7 @@ void Renderer::drawCard(SDL_FRect rc, Card card, bool highlight) {
     float pad = rc.w * 0.08f;
     float topY = rc.y + pad;
     drawText(rc.x + pad, topY, px, c, rs);
-    drawSuit(card.suit, rc.x + pad + textWidth(px, rs) * 0.5f, topY + px + rc.h * 0.045f, rc.h * 0.10f);
+    drawSuit(card.suit, rc.x + pad + textWidth(px, rs) * 0.5f, topY + px + rc.h * 0.02f, rc.h * 0.10f);
 
     // Large central pip.
     drawSuit(card.suit, rc.x + rc.w * 0.5f, rc.y + rc.h * 0.55f, rc.h * 0.34f);
