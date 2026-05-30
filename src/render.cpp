@@ -368,15 +368,16 @@ void Renderer::drawCard(SDL_FRect rc, Card card, bool highlight) {
     fillRoundedRect(face, radius - border, rgba(248, 246, 240));
 
     const SDL_FColor c = isRed(card.suit) ? red() : black();
-    // Compact corner index so a small fan/overlap still reveals rank + suit.
-    const float px = rc.h * 0.17f;
+    // Bold, generously sized corner index so it stays readable on small screens
+    // and through a fanned overlap.
+    const float px = rc.h * 0.20f;
     const char* rs = rankString(card.rank);
 
     // Top-left corner: rank over a small pip centred under it.
     float pad = rc.w * 0.08f;
     drawText(rc.x + pad, rc.y + pad * 0.6f, px, c, rs);
-    drawSuit(card.suit, rc.x + pad + textWidth(px, rs) * 0.5f, rc.y + pad * 0.6f + px + rc.h * 0.05f,
-             rc.h * 0.095f);
+    drawSuit(card.suit, rc.x + pad + textWidth(px, rs) * 0.5f, rc.y + pad * 0.6f + px + rc.h * 0.045f,
+             rc.h * 0.10f);
 
     // Large central pip.
     drawSuit(card.suit, rc.x + rc.w * 0.5f, rc.y + rc.h * 0.55f, rc.h * 0.34f);

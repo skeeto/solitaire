@@ -3,9 +3,9 @@
 ## Embedded font
 
 Text is rendered with [`stb_truetype`](../third_party/stb_truetype.h) (a single
-public-domain header) using **Inter** (Regular), subset to printable ASCII and
-embedded in [`../src/font_data.h`](../src/font_data.h) so the binary stays
-self-contained.
+public-domain header) using **Inter** (Bold, for heavy/readable card values),
+subset to printable ASCII and embedded in [`../src/font_data.h`](../src/font_data.h)
+so the binary stays self-contained.
 
 - `Inter-subset.ttf` — the subset actually embedded (~17 KB).
 - `Inter-LICENSE.txt` — Inter is licensed under the SIL Open Font License 1.1.
@@ -20,10 +20,10 @@ Requires `fonttools` (e.g. in a venv) and the upstream Inter variable font.
 curl -L -o /tmp/Inter.ttf \
   "https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz,wght%5D.ttf"
 
-# 2. instance to Regular and subset to printable ASCII
+# 2. instance to Bold (wght=700) and subset to printable ASCII
 python3 -m venv /tmp/ftenv && /tmp/ftenv/bin/pip install fonttools
-/tmp/ftenv/bin/fonttools varLib.instancer /tmp/Inter.ttf wght=400 -o /tmp/InterReg.ttf
-/tmp/ftenv/bin/pyftsubset /tmp/InterReg.ttf --unicodes=U+0020-007E --no-hinting \
+/tmp/ftenv/bin/fonttools varLib.instancer /tmp/Inter.ttf wght=700 -o /tmp/InterBold.ttf
+/tmp/ftenv/bin/pyftsubset /tmp/InterBold.ttf --unicodes=U+0020-007E --no-hinting \
   --drop-tables+=GSUB,GPOS,GDEF,FFTM --output-file=assets/Inter-subset.ttf
 
 # 3. bake the TTF bytes into the C header
