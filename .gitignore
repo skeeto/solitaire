@@ -4,3 +4,6 @@
 *.o
 *.obj
 .DS_Store
+
+# gh-pages branch worktree (deploy target)
+/gh-pages/
