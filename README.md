@@ -48,8 +48,16 @@ The build emits `index.html` / `index.js` / `index.wasm` plus the PWA support
 files (`manifest.webmanifest`, `sw.js`, icons), so the page is installable and
 works offline after the first load. The service worker's cache name is stamped
 with a hash of the wasm at build time, so each deploy supersedes the old cache.
-Deploy by copying the contents of `build-web/` to any static HTTPS host (e.g.
-GitHub Pages).
+
+To deploy, install the complete site to any static HTTPS host (e.g. a GitHub
+Pages worktree):
+
+```sh
+cmake --install build-web --prefix /path/to/gh-pages-worktree
+```
+
+This copies the seven deployable files (including the stamped `sw.js`) into the
+prefix; all asset paths are relative, so subdirectory hosting works too.
 
 ## Licenses
 

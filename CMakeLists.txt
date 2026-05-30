@@ -62,6 +62,19 @@ if(EMSCRIPTEN)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/stamp_sw.cmake
         VERBATIM
     )
+
+    # Install the complete, deployable site to CMAKE_INSTALL_PREFIX (e.g. a
+    # gh-pages worktree). Note sw.js comes from the build dir (the stamped copy).
+    install(FILES
+        $<TARGET_FILE:solitaire>                       # index.html
+        $<TARGET_FILE_DIR:solitaire>/index.js
+        $<TARGET_FILE_DIR:solitaire>/index.wasm
+        $<TARGET_FILE_DIR:solitaire>/sw.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/web/manifest.webmanifest
+        ${CMAKE_CURRENT_SOURCE_DIR}/web/icon-192.png
+        ${CMAKE_CURRENT_SOURCE_DIR}/web/icon-512.png
+        DESTINATION .
+    )
 endif()
 
 # --- Native window icon and platform packaging ---
