@@ -33,9 +33,17 @@ public:
 
         stbtt_fontinfo info;
         stbtt_InitFont(&info, kFontTTF, stbtt_GetFontOffsetForIndex(kFontTTF, 0));
-        int asc = 0, desc = 0, gap = 0;
-        stbtt_GetFontVMetrics(&info, &asc, &desc, &gap);
-        ascentBaked_ = asc * stbtt_ScaleForPixelHeight(&info, bakePx_);
+        float sc = stbtt_ScaleForPixelHeight(&info, bakePx_);
+        // Use cap height (top of 'H' above the baseline) as the text height so
+        // (x, y) is the cap top and short labels center cleanly.
+        int hx0 = 0, hy0 = 0, hx1 = 0, hy1 = 0;
+        if (stbtt_GetCodepointBox(&info, 'H', &hx0, &hy0, &hx1, &hy1) && hy1 > 0) {
+            capBaked_ = hy1 * sc;
+        } else {
+            int asc = 0, desc = 0, gap = 0;
+            stbtt_GetFontVMetrics(&info, &asc, &desc, &gap);
+            capBaked_ = 0.72f * asc * sc;
+        }
 
         std::vector<unsigned char> rgba((size_t)atlasW_ * atlasH_ * 4);
         for (size_t i = 0; i < (size_t)atlasW_ * atlasH_; ++i) {
@@ -67,14 +75,14 @@ public:
         return w * (px / bakePx_);
     }
 
-    float height(float px) const { return ascentBaked_ * (px / bakePx_); }
+    float height(float px) const { return capBaked_ * (px / bakePx_); }
 
     void draw(float x, float y, float px, SDL_FColor col, const char* s) {
         if (!atlas_) return;
         float scale = px / bakePx_;
         SDL_SetTextureColorModFloat(atlas_, col.r, col.g, col.b);
         SDL_SetTextureAlphaModFloat(atlas_, col.a);
-        float cx = 0, cy = ascentBaked_;
+        float cx = 0, cy = capBaked_;  // baseline so the cap top lands at y
         for (; *s; ++s) {
             int c = (unsigned char)*s;
             if (c < 32 || c >= 127) c = 32;
@@ -90,7 +98,7 @@ private:
     SDL_Renderer* r_ = nullptr;
     SDL_Texture* atlas_ = nullptr;
     float bakePx_ = 48.0f;
-    float ascentBaked_ = 0;
+    float capBaked_ = 0;
     int atlasW_ = 0, atlasH_ = 0;
     stbtt_packedchar packed_[95];
 };
@@ -487,6 +495,17 @@ void Renderer::drawSpeaker(SDL_FRect rc, bool muted, SDL_FColor c) {
     // Speaker body (small rect) + cone (triangle) centred in the button.
     float cx = rc.x + rc.w * 0.40f, cy = rc.y + rc.h * 0.5f;
     float s = std::min(rc.w, rc.h) * 0.5f;
+    float th = std::max(2.2f, s * 0.16f);  // stroke thickness for waves / mute X
+
+    // A thick, antialiased line segment drawn as a quad.
+    auto thickLine = [&](float x0, float y0, float x1, float y1) {
+        float dx = x1 - x0, dy = y1 - y0, len = std::sqrt(dx * dx + dy * dy);
+        if (len < 1e-4f) return;
+        float nx = -dy / len * th * 0.5f, ny = dx / len * th * 0.5f;
+        SDL_FPoint p[4] = {{x0 + nx, y0 + ny}, {x1 + nx, y1 + ny}, {x1 - nx, y1 - ny}, {x0 - nx, y0 - ny}};
+        fillConvex(p, 4, c);
+    };
+
     fillRect(SDL_FRect{cx - s * 0.55f, cy - s * 0.22f, s * 0.30f, s * 0.44f}, c);
     SDL_FPoint cone[3] = {{cx - s * 0.25f, cy - s * 0.20f},
                           {cx - s * 0.25f, cy + s * 0.20f},
@@ -496,22 +515,22 @@ void Renderer::drawSpeaker(SDL_FRect rc, bool muted, SDL_FColor c) {
                            {cx + s * 0.15f, cy + s * 0.45f}};
     fillConvex(cone, 3, c);
     fillConvex(cone2, 3, c);
-    SDL_SetRenderDrawColorFloat(r_, c.r, c.g, c.b, c.a);
+
     if (muted) {
-        float x0 = cx + s * 0.30f, x1 = cx + s * 0.75f, y0 = cy - s * 0.30f, y1 = cy + s * 0.30f;
-        SDL_RenderLine(r_, x0, y0, x1, y1);
-        SDL_RenderLine(r_, x0, y1, x1, y0);
+        float x0 = cx + s * 0.28f, x1 = cx + s * 0.82f, y0 = cy - s * 0.32f, y1 = cy + s * 0.32f;
+        thickLine(x0, y0, x1, y1);
+        thickLine(x0, y1, x1, y0);
     } else {
-        // Two sound arcs approximated with short line segments.
+        // Two thick sound arcs built from short thick segments.
         for (int k = 1; k <= 2; ++k) {
-            float rr = s * (0.30f + 0.22f * k);
-            float bx = cx + s * 0.20f;
+            float rr = s * (0.30f + 0.26f * k);
+            float bx = cx + s * 0.18f;
             float prevx = 0, prevy = 0;
             for (int i = 0; i <= 8; ++i) {
-                float a = -0.6f + 1.2f * i / 8.0f;
+                float a = -0.62f + 1.24f * i / 8.0f;
                 float px = bx + rr * std::cos(a);
                 float py = cy + rr * std::sin(a);
-                if (i) SDL_RenderLine(r_, prevx, prevy, px, py);
+                if (i) thickLine(prevx, prevy, px, py);
                 prevx = px;
                 prevy = py;
             }

@@ -52,6 +52,8 @@ struct Lift {
 struct App {
     SDL_Window* window = nullptr;
     SDL_Renderer* sdl = nullptr;
+    SDL_Cursor* curArrow = nullptr;
+    SDL_Cursor* curHand = nullptr;
     Renderer rr;
     Audio audio;
     Game game;
@@ -384,7 +386,19 @@ struct App {
         havePress = hitBoard(x, y);
     }
 
+    void setHoverCursor(bool hand) {
+#ifdef __EMSCRIPTEN__
+        EM_ASM({ Module.canvas.style.cursor = $0 ? 'pointer' : 'default'; }, hand);
+#else
+        if (SDL_Cursor* w = hand ? curHand : curArrow) SDL_SetCursor(w);
+#endif
+    }
+
     void onPointerMove(float x, float y) {
+        // Hand cursor over the clickable buttons.
+        bool overBtn = inRect(x, y, layout.redealBtn) || inRect(x, y, layout.muteBtn);
+        setHoverCursor(overBtn && !lift.active);
+
         if (lift.active && lift.followPointer) {
             lift.px = x;
             lift.py = y;
@@ -487,11 +501,11 @@ struct App {
 
         // UI: wins counter (top-right), buttons.
         char buf[64];
-        std::snprintf(buf, sizeof(buf), "WINS %d", stats.wins);
+        std::snprintf(buf, sizeof(buf), "%d wins", stats.wins);
         float ws = layout.uiTextPx;
         rr.drawText(layout.winsAnchor.x - rr.textWidth(ws, buf), layout.winsAnchor.y, ws,
                     rgba(245, 245, 235), buf);
-        drawButton(layout.redealBtn, "RE-DEAL");
+        drawButton(layout.redealBtn, "Re-deal");
         rr.fillRoundedRect(layout.muteBtn, layout.muteBtn.h * 0.25f, rgba(34, 120, 92));
         rr.drawSpeaker(layout.muteBtn, stats.muted, rgba(240, 248, 244));
 
@@ -518,7 +532,7 @@ struct App {
             const char* msg = "YOU WIN!";
             rr.drawText((w - rr.textWidth(s, msg)) * 0.5f, h * 0.5f - rr.textHeight(s),
                         s, rgba(255, 230, 130), msg);
-            const char* sub = "PRESS RE-DEAL TO PLAY AGAIN";
+            const char* sub = "Press Re-deal to play again";
             float s2 = std::max(12.0f, layout.cardH * 0.20f);
             rr.drawText((w - rr.textWidth(s2, sub)) * 0.5f, h * 0.5f + rr.textHeight(s) * 0.6f,
                         s2, rgba(230, 230, 230), sub);
@@ -579,6 +593,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
     }
     SDL_SetRenderVSync(app->sdl, 1);
     app->rr.init(app->sdl);
+    app->curArrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+    app->curHand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
     app->audio.init();
     app->stats = loadStats();
     app->audio.setMuted(app->stats.muted);
@@ -643,6 +659,8 @@ void SDL_AppQuit(void* appstate, SDL_AppResult) {
     if (app) {
         app->audio.shutdown();
         app->rr.shutdown();  // free the font atlas before destroying the renderer
+        if (app->curArrow) SDL_DestroyCursor(app->curArrow);
+        if (app->curHand) SDL_DestroyCursor(app->curHand);
         if (app->sdl) SDL_DestroyRenderer(app->sdl);
         if (app->window) SDL_DestroyWindow(app->window);
         delete app;
