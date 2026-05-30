@@ -269,17 +269,35 @@ void Renderer::fillConvex(const SDL_FPoint* pts, int n, SDL_FColor c) {
     center.x /= n;
     center.y /= n;
 
+    // Antialiasing: a ~1px fringe of vertices offset radially outward at alpha 0,
+    // so the GPU interpolates a smooth edge. Where this fringe overlaps another
+    // shape of the same opaque color it resolves to that color (no seams).
+    constexpr float kAA = 1.2f;
+    SDL_FColor edge = c;
+    edge.a = 0.0f;
+
     std::vector<SDL_Vertex> v;
-    v.reserve(n + 1);
-    v.push_back(SDL_Vertex{center, c, {0, 0}});
-    for (int i = 0; i < n; ++i) v.push_back(SDL_Vertex{pts[i], c, {0, 0}});
+    v.reserve(2 * n + 1);
+    v.push_back(SDL_Vertex{center, c, {0, 0}});          // 0: center
+    for (int i = 0; i < n; ++i)                          // 1..n: inner perimeter (solid)
+        v.push_back(SDL_Vertex{pts[i], c, {0, 0}});
+    for (int i = 0; i < n; ++i) {                        // n+1..2n: outer fringe (transparent)
+        float dx = pts[i].x - center.x, dy = pts[i].y - center.y;
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len < 1e-4f) len = 1.0f;
+        SDL_FPoint o{pts[i].x + dx / len * kAA, pts[i].y + dy / len * kAA};
+        v.push_back(SDL_Vertex{o, edge, {0, 0}});
+    }
 
     std::vector<int> idx;
-    idx.reserve(n * 3);
+    idx.reserve(n * 9);
+    const int inner = 1, outer = 1 + n;
     for (int i = 0; i < n; ++i) {
-        idx.push_back(0);
-        idx.push_back(1 + i);
-        idx.push_back(1 + (i + 1) % n);
+        int a = inner + i, b = inner + (i + 1) % n;
+        int oa = outer + i, ob = outer + (i + 1) % n;
+        idx.push_back(0);  idx.push_back(a);  idx.push_back(b);   // interior fan
+        idx.push_back(a);  idx.push_back(b);  idx.push_back(ob);  // fringe quad
+        idx.push_back(a);  idx.push_back(ob); idx.push_back(oa);
     }
     SDL_RenderGeometry(r_, nullptr, v.data(), (int)v.size(), idx.data(), (int)idx.size());
 }
