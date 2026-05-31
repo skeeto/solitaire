@@ -127,7 +127,7 @@ struct App {
     }
 
     void redeal() {
-        game.deal();
+        game.dealWinnable();
         won = false;
         drawing = false;
         lift = Lift{};
@@ -651,6 +651,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
     if (!saved.empty() && app->game.deserialize(saved) && !app->game.won()) {
         app->dealing = false;
     } else {
+        app->game.dealWinnable();  // fresh, proven-winnable opening
         app->startDealAnim();
         app->persist();  // save the opening deal so a refresh resumes it
     }

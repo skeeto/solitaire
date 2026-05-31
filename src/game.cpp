@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <limits>
+#include <random>
 #include <sstream>
+
+#include "pool_data.h"  // embedded bitmap of proven-winnable seeds
 
 Game::Game() {
     rng.seed(std::random_device{}());
@@ -18,7 +21,12 @@ void Game::deal() {
     // Reshuffle until no column's exposed (bottom-most, playable) card is an Ace,
     // matching the original's deal generator avoiding exposed opening Aces.
     for (;;) {
-        std::shuffle(deck.begin(), deck.end(), rng);
+        // Portable Fisher-Yates (deterministic across platforms; std::shuffle is
+        // implementation-defined and would not reproduce a seed's deal in wasm).
+        for (int i = (int)deck.size() - 1; i > 0; --i) {
+            uint64_t j = rng.bounded((uint64_t)i + 1);
+            std::swap(deck[i], deck[(size_t)j]);
+        }
         bool exposedAce = false;
         // Columns get 1..7 cards; the last dealt card of a column is the exposed one.
         int idx = 0;
@@ -40,6 +48,32 @@ void Game::deal() {
     for (int col = 0; col < 7; ++col)
         for (int n = 0; n <= col; ++n) tableau[col].push_back(deck[idx++]);
     while (idx < 52) stock.push_back(deck[idx++]);
+}
+
+void Game::dealWinnable() {
+    // Pool entries are seed values in [0, kWinnablePoolBits); a set bit means the
+    // solver proved that seed's deal winnable. We only randomize *which* entry to
+    // play -- a process-lifetime picker seeded from the random device, with all 256
+    // bits filled (the same full-state path on-demand generation would use). The
+    // chosen seed then reproduces its proven-winnable deal deterministically.
+    static Xoshiro256ss picker = [] {
+        std::random_device rd;
+        auto word = [&] { return ((uint64_t)rd() << 32) ^ (uint64_t)rd(); };
+        Xoshiro256ss x;
+        x.seedState(word(), word(), word(), word());
+        return x;
+    }();
+
+    auto isWinnable = [](uint32_t i) -> bool {
+        return (kWinnablePool[i >> 3] >> (i & 7)) & 1u;
+    };
+    uint32_t seed;
+    do {
+        seed = (uint32_t)picker.bounded(kWinnablePoolBits);
+    } while (!isWinnable(seed));
+
+    rng.seed(seed);
+    deal();
 }
 
 int Game::draw3() {

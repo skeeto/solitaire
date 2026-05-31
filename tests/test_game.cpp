@@ -36,6 +36,34 @@ int main() {
         CHECK(!g.freecellUnlocked);
     }
 
+    // --- deterministic, portable deal: a seed reproduces an identical deal ---
+    {
+        auto sameDeal = [](const Game& x, const Game& y) {
+            for (int c = 0; c < 7; ++c) {
+                if (x.tableau[c].size() != y.tableau[c].size()) return false;
+                for (size_t i = 0; i < x.tableau[c].size(); ++i)
+                    if (x.tableau[c][i].suit != y.tableau[c][i].suit ||
+                        x.tableau[c][i].rank != y.tableau[c][i].rank)
+                        return false;
+            }
+            if (x.stock.size() != y.stock.size()) return false;
+            for (size_t i = 0; i < x.stock.size(); ++i)
+                if (x.stock[i].suit != y.stock[i].suit || x.stock[i].rank != y.stock[i].rank)
+                    return false;
+            return true;
+        };
+        Game p, q;
+        p.rng.seed(123456789ULL);
+        q.rng.seed(123456789ULL);
+        p.deal();
+        q.deal();
+        CHECK(sameDeal(p, q));   // same seed -> identical deal
+        Game r;
+        r.rng.seed(987654321ULL);
+        r.deal();
+        CHECK(!sameDeal(p, r));  // different seed -> different deal
+    }
+
     // --- draw-three single pass + free-cell unlock ---
     g.deal();
     CHECK(g.draw3() == 3);

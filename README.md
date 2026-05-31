@@ -22,8 +22,34 @@ See [docs/sawayama-solitaire.md](docs/sawayama-solitaire.md) for the full rules.
   reset. When the stock runs out, that slot becomes a single **free cell**.
 - Cards advance to the foundations automatically (a conservative auto-mover);
   **double-click** a card to force it up.
-- **RE-DEAL** starts a new game at any time. The speaker icon toggles sound.
-  Lifetime wins are shown top-right and persisted.
+- **RE-DEAL** starts a new (always winnable) game at any time. The speaker icon
+  toggles sound. Lifetime wins are shown top-right and persisted.
+
+## Winnable deals
+
+Every deal the game presents is **guaranteed solvable**. Roughly a quarter of
+random Sawayama layouts are unwinnable from the start, which isn't much fun, so
+deals are drawn from a pre-computed pool of seeds that an exhaustive solver proved
+winnable (`src/pool_data.h`, a compact bitmap). The deal RNG is
+**xoshiro256\*\*** seeded via splitmix64 with an integer-only Fisher–Yates
+shuffle, so a given seed reproduces a byte-identical deal on every platform — which
+is exactly what lets a seed proven winnable by the native solver reproduce that
+same winnable deal in the wasm build.
+
+The solver (`tools/solver.cpp`, native-only, built alongside the game) doubles as a
+Monte-Carlo winnability estimator. To regenerate the pool:
+
+```sh
+cmake --build build --target solver
+# scan seeds [0, --bits) at a per-deal node budget; rewrite the bitmap header
+./build/solver --genpool --bits 131072 --budget 2000000 --threads 16 --out src/pool_data.h
+cmake --build build   # rebuild the game against the new pool
+```
+
+A higher `--budget` proves more of the harder deals winnable (less selection bias
+toward easy deals) at the cost of generation time; `--bits` sets the seed range
+scanned. Without `--genpool`, the solver runs the Monte-Carlo estimate instead
+(`--deals N --budget B --threads T`).
 
 ## Build — native
 

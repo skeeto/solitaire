@@ -5,9 +5,10 @@
 #include <array>
 #include <cstdint>
 #include <optional>
-#include <random>
 #include <string>
 #include <vector>
+
+#include "rng.hpp"
 
 enum class Suit : int { Hearts = 0, Diamonds = 1, Spades = 2, Clubs = 3 };
 
@@ -37,12 +38,19 @@ struct Game {
     std::optional<Card> freecell;
     bool freecellUnlocked = false;
 
-    std::mt19937_64 rng;
+    Xoshiro256ss rng;
 
     Game();
 
     // Shuffle and deal a fresh game, filtering out openings that expose an Ace.
+    // Deterministic in the current RNG state: seeding `rng` then calling deal()
+    // reproduces an identical deal everywhere (this is what the solver relies on).
     void deal();
+
+    // Deal a fresh game drawn from the embedded pool of proven-winnable seeds, so
+    // the player only ever sees winnable openings. Picks a random pool seed using
+    // its own entropy source (the chosen seed is then reproduced deterministically).
+    void dealWinnable();
 
     // Draw up to three cards from the stock to the waste (single pass). Unlocks
     // the free cell once the stock is exhausted. Returns how many were drawn.
