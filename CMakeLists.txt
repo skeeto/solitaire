@@ -98,3 +98,11 @@ if(APPLE AND NOT EMSCRIPTEN)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.icns PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources")
 endif()
+
+# --- Winnability solver / Monte Carlo (native analysis tool; not shipped) ---
+if(NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
+    add_executable(solver tools/solver.cpp src/game.cpp)
+    target_include_directories(solver PRIVATE src)
+    target_link_libraries(solver PRIVATE Threads::Threads)
+endif()

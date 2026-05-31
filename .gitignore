@@ -7,3 +7,6 @@
 
 # gh-pages branch worktree (deploy target)
 /gh-pages/
+
+# editor ctags
+/tags
