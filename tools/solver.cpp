@@ -4,8 +4,8 @@
 // graph search for a path that empties everything onto the foundations. The
 // conservative auto-mover doesn't affect winnability (it never blocks a win, and
 // double-click can force any foundation-ready card), so the solver treats every
-// foundation-ready exposed card as movable. It reuses the game's Game model only
-// to generate deals (matching the real ace-filtered shuffle).
+// foundation-ready exposed card as movable. It reuses Game only to generate deals
+// (matching the real ace-filtered shuffle).
 //
 // Search: iterative DFS over canonicalized states with a transposition table.
 //   - "Safe" foundation moves (the conservative auto-mover rule, which is
@@ -13,8 +13,10 @@
 //     reduction. Unsafe foundation moves are kept as optional branches.
 //   - The 7 tableau columns are interchangeable, so they're sorted before
 //     hashing; empty columns are interchangeable, so only the first is a target.
+//   - A progress heuristic explores higher-scoring children first so winnable
+//     deals beeline toward the goal.
 //   - Per-deal node budget => each deal returns solved / unsolvable / undetermined
-//     (budget hit). The win rate is therefore a measured lower bound.
+//     (budget hit). State is a fixed-size POD so copies are a single memcpy.
 //
 // Usage:
 //   solver [--deals N] [--start S] [--budget B] [--threads T]
@@ -23,7 +25,6 @@
 // Seeds are reproducible with the same build (std::mt19937_64 + std::shuffle).
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <climits>
 #include <cmath>
@@ -31,7 +32,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <string>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -40,7 +40,7 @@
 
 namespace {
 
-// Card encoding matches Game::serialize: id = suit*13 + (rank-1), suits in
+// Card encoding matches Game::serialize: id = suit*13 + (rank-1); suits
 // {Hearts=0, Diamonds=1, Spades=2, Clubs=3}; Hearts/Diamonds are red.
 inline int csuit(uint8_t c) { return c / 13; }
 inline int crank(uint8_t c) { return c % 13 + 1; }
@@ -49,22 +49,35 @@ inline bool canStackOn(uint8_t moving, uint8_t onto) {
     return crank(moving) == crank(onto) - 1 && cred(moving) != cred(onto);
 }
 
+// A fixed-capacity card stack. Columns max out around 19 cards (<=7 dealt + a
+// <=12-card run); stock and waste are <=24. 24 is a safe bound with margin.
+constexpr int kCap = 24;
+struct Pile {
+    uint8_t a[kCap];
+    uint8_t n = 0;
+    bool empty() const { return n == 0; }
+    uint8_t back() const { return a[n - 1]; }
+    void push(uint8_t c) {
+        if (n >= kCap) { std::fprintf(stderr, "pile overflow\n"); std::abort(); }
+        a[n++] = c;
+    }
+    uint8_t pop() { return a[--n]; }
+};
+
 struct State {
-    std::vector<uint8_t> col[7];  // bottom..top; top (back) is the exposed card
-    std::vector<uint8_t> stock;   // drawn from the back
-    std::vector<uint8_t> waste;   // top (back) is the only playable card
+    Pile col[7];
+    Pile stock;  // drawn from the back
+    Pile waste;  // top (back) is the only playable card
     uint8_t found[4] = {0, 0, 0, 0};
     int cell = -1;  // free cell card (-1 = empty); usable only once stock is gone
 };
 
 // The free cell unlocks permanently once the stock is exhausted; since the stock
-// only shrinks, "stock empty" is equivalent to "free cell available".
+// only shrinks, "stock empty" == "free cell available".
 inline bool cellActive(const State& s) { return s.stock.empty(); }
-
 inline bool isWin(const State& s) {
     return s.found[0] == 13 && s.found[1] == 13 && s.found[2] == 13 && s.found[3] == 13;
 }
-
 inline bool foundationReady(const State& s, uint8_t c) {
     return s.found[csuit(c)] == crank(c) - 1;
 }
@@ -97,14 +110,12 @@ void autoAdvance(State& s) {
         moved = false;
         for (int i = 0; i < 7; ++i)
             if (!s.col[i].empty() && autoEligible(s, s.col[i].back())) {
-                uint8_t c = s.col[i].back();
-                s.col[i].pop_back();
+                uint8_t c = s.col[i].pop();
                 s.found[csuit(c)] = crank(c);
                 moved = true;
             }
         if (!s.waste.empty() && autoEligible(s, s.waste.back())) {
-            uint8_t c = s.waste.back();
-            s.waste.pop_back();
+            uint8_t c = s.waste.pop();
             s.found[csuit(c)] = crank(c);
             moved = true;
         }
@@ -118,14 +129,14 @@ void autoAdvance(State& s) {
 }
 
 void moveRun(State& ns, int src, int j, int dst) {
-    auto& cs = ns.col[src];
-    auto& cd = ns.col[dst];
-    for (size_t t = j; t < cs.size(); ++t) cd.push_back(cs[t]);
-    cs.resize(j);
+    Pile& cs = ns.col[src];
+    Pile& cd = ns.col[dst];
+    for (int t = j; t < cs.n; ++t) cd.push(cs.a[t]);
+    cs.n = (uint8_t)j;
 }
 
-// Generate children (each is one raw move; the caller auto-advances them). Moves
-// are ordered foundation -> build -> stash -> draw so the DFS tries progress first.
+// Generate children (each is one raw move; the caller auto-advances them),
+// ordered foundation -> build -> stash -> draw so the DFS tries progress first.
 void genChildren(const State& s, std::vector<State>& out) {
     int firstEmpty = -1;
     for (int d = 0; d < 7; ++d)
@@ -135,11 +146,11 @@ void genChildren(const State& s, std::vector<State>& out) {
     auto sendUp = [&](uint8_t c, int fromCol, bool fromWaste, bool fromCell) {
         if (!foundationReady(s, c) || autoEligible(s, c)) return;
         State ns = s;
-        if (fromCol >= 0) ns.col[fromCol].pop_back();
-        else if (fromWaste) ns.waste.pop_back();
+        if (fromCol >= 0) ns.col[fromCol].pop();
+        else if (fromWaste) ns.waste.pop();
         else if (fromCell) ns.cell = -1;
         ns.found[csuit(c)] = crank(c);
-        out.push_back(std::move(ns));
+        out.push_back(ns);
     };
     for (int i = 0; i < 7; ++i)
         if (!s.col[i].empty()) sendUp(s.col[i].back(), i, false, false);
@@ -148,13 +159,13 @@ void genChildren(const State& s, std::vector<State>& out) {
 
     // 2. Tableau run -> tableau (any valid descending/alt-color suffix).
     for (int src = 0; src < 7; ++src) {
-        const auto& cs = s.col[src];
+        const Pile& cs = s.col[src];
         if (cs.empty()) continue;
-        int len = (int)cs.size();
+        int len = cs.n;
         int k = len - 1;
-        while (k > 0 && canStackOn(cs[k], cs[k - 1])) --k;  // longest movable run
+        while (k > 0 && canStackOn(cs.a[k], cs.a[k - 1])) --k;  // longest movable run
         for (int j = len - 1; j >= k; --j) {
-            uint8_t bottom = cs[j];  // the card that lands on the destination
+            uint8_t bottom = cs.a[j];  // the card that lands on the destination
             for (int dst = 0; dst < 7; ++dst) {
                 if (dst == src) continue;
                 if (s.col[dst].empty()) {
@@ -164,7 +175,7 @@ void genChildren(const State& s, std::vector<State>& out) {
                 }
                 State ns = s;
                 moveRun(ns, src, j, dst);
-                out.push_back(std::move(ns));
+                out.push_back(ns);
             }
         }
     }
@@ -179,9 +190,9 @@ void genChildren(const State& s, std::vector<State>& out) {
                 continue;
             }
             State ns = s;
-            ns.waste.pop_back();
-            ns.col[dst].push_back(c);
-            out.push_back(std::move(ns));
+            ns.waste.pop();
+            ns.col[dst].push(c);
+            out.push_back(ns);
         }
     }
 
@@ -196,8 +207,8 @@ void genChildren(const State& s, std::vector<State>& out) {
             }
             State ns = s;
             ns.cell = -1;
-            ns.col[dst].push_back(c);
-            out.push_back(std::move(ns));
+            ns.col[dst].push(c);
+            out.push_back(ns);
         }
     }
 
@@ -206,45 +217,44 @@ void genChildren(const State& s, std::vector<State>& out) {
         for (int src = 0; src < 7; ++src)
             if (!s.col[src].empty()) {
                 State ns = s;
-                ns.cell = ns.col[src].back();
-                ns.col[src].pop_back();
-                out.push_back(std::move(ns));
+                ns.cell = ns.col[src].pop();
+                out.push_back(ns);
             }
         if (!s.waste.empty()) {
             State ns = s;
-            ns.cell = ns.waste.back();
-            ns.waste.pop_back();
-            out.push_back(std::move(ns));
+            ns.cell = ns.waste.pop();
+            out.push_back(ns);
         }
     }
 
     // 6. Draw three from the stock (single pass; deterministic).
     if (!s.stock.empty()) {
         State ns = s;
-        for (int i = 0; i < 3 && !ns.stock.empty(); ++i) {
-            ns.waste.push_back(ns.stock.back());
-            ns.stock.pop_back();
-        }
-        out.push_back(std::move(ns));
+        for (int i = 0; i < 3 && !ns.stock.empty(); ++i) ns.waste.push(ns.stock.pop());
+        out.push_back(ns);
     }
 }
 
 // Canonical 64-bit hash: columns sorted (interchangeable), with separators.
 uint64_t canonHash(const State& s) {
-    const std::vector<uint8_t>* cols[7];
+    const Pile* cols[7];
     for (int i = 0; i < 7; ++i) cols[i] = &s.col[i];
-    std::sort(cols, cols + 7,
-              [](const std::vector<uint8_t>* a, const std::vector<uint8_t>* b) { return *a < *b; });
+    std::sort(cols, cols + 7, [](const Pile* a, const Pile* b) {
+        int n = std::min(a->n, b->n);
+        for (int i = 0; i < n; ++i)
+            if (a->a[i] != b->a[i]) return a->a[i] < b->a[i];
+        return a->n < b->n;
+    });
     uint64_t h = 1469598103934665603ull;
     auto mix = [&](uint8_t b) { h ^= b; h *= 1099511628211ull; };
     for (auto cp : cols) {
         mix(0xFF);
-        for (uint8_t b : *cp) mix(b);
+        for (int i = 0; i < cp->n; ++i) mix(cp->a[i]);
     }
     mix(0xFE);
-    for (uint8_t b : s.stock) mix(b);
+    for (int i = 0; i < s.stock.n; ++i) mix(s.stock.a[i]);
     mix(0xFD);
-    for (uint8_t b : s.waste) mix(b);
+    for (int i = 0; i < s.waste.n; ++i) mix(s.waste.a[i]);
     mix(0xFC);
     for (int i = 0; i < 4; ++i) mix(s.found[i]);
     mix(0xFB);
@@ -252,9 +262,7 @@ uint64_t canonHash(const State& s) {
     return h;
 }
 
-// Cheap progress heuristic: foundation cards already up, plus exposed cards that
-// are about to auto-advance. The DFS explores higher-scoring children first so
-// winnable deals beeline toward the goal.
+// Cheap progress heuristic: foundation cards plus exposed cards about to advance.
 inline int progressScore(const State& s) {
     int sc = s.found[0] + s.found[1] + s.found[2] + s.found[3];
     for (int i = 0; i < 7; ++i)
@@ -282,8 +290,9 @@ Outcome solve(const State& init, size_t budget, size_t* nodesOut = nullptr) {
         ~NodesGuard() { if (o) *o = n; }
     } guard{nodesOut, nodes};
 
-    auto expand = [&](State st) -> int {  // 1 = win, 0 = pushed, -1 = already seen
+    auto expand = [&](const State& st0) -> int {  // 1 = win, 0 = pushed, -1 = already seen
         ++nodes;
+        State st = st0;
         autoAdvance(st);
         if (isWin(st)) return 1;
         if (!closed.insert(canonHash(st)).second) return -1;
@@ -297,7 +306,7 @@ Outcome solve(const State& init, size_t budget, size_t* nodesOut = nullptr) {
                              [](const auto& a, const auto& b) { return a.first > b.first; });
             std::vector<State> reordered;
             reordered.reserve(nk);
-            for (auto& pr : order) reordered.push_back(std::move(f.kids[pr.second]));
+            for (auto& pr : order) reordered.push_back(f.kids[pr.second]);
             f.kids.swap(reordered);
         }
         stack.push_back(std::move(f));
@@ -312,8 +321,8 @@ Outcome solve(const State& init, size_t budget, size_t* nodesOut = nullptr) {
             stack.pop_back();
             continue;
         }
-        State child = std::move(f.kids[f.idx++]);
-        if (expand(std::move(child)) == 1) return SOLVED;  // expand may invalidate f; not reused
+        State child = f.kids[f.idx++];
+        if (expand(child) == 1) return SOLVED;  // expand may invalidate f; not reused
     }
     return UNSOLVABLE;
 }
@@ -325,9 +334,8 @@ State dealSeed(uint64_t seed) {
     State s;
     for (int i = 0; i < 7; ++i)
         for (const auto& c : g.tableau[i])
-            s.col[i].push_back((uint8_t)((int)c.suit * 13 + (c.rank - 1)));
-    for (const auto& c : g.stock)
-        s.stock.push_back((uint8_t)((int)c.suit * 13 + (c.rank - 1)));
+            s.col[i].push((uint8_t)((int)c.suit * 13 + (c.rank - 1)));
+    for (const auto& c : g.stock) s.stock.push((uint8_t)((int)c.suit * 13 + (c.rank - 1)));
     for (int i = 0; i < 4; ++i) s.found[i] = (uint8_t)g.foundation[i];
     return s;
 }
@@ -338,10 +346,8 @@ struct Tally {
     std::vector<uint64_t> undeterminedSeeds;
 };
 
-struct Wilson {
-    double lo, hi;
-};
-Wilson wilson(long k, long n, double z = 1.96) {
+struct CI { double lo, hi; };
+CI wilson(long k, long n, double z = 1.96) {
     if (n == 0) return {0, 0};
     double p = (double)k / n, z2 = z * z, denom = 1 + z2 / n;
     double center = (p + z2 / (2 * n)) / denom;
@@ -358,22 +364,16 @@ long argLong(int argc, char** argv, const char* flag, long def) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    size_t budget = (size_t)argLong(argc, argv, "--budget", 500000);
+    size_t budget = (size_t)argLong(argc, argv, "--budget", 2000000);
 
     for (int i = 1; i + 1 < argc; ++i)
         if (std::strcmp(argv[i], "--seed") == 0) {
             uint64_t seed = (uint64_t)std::atoll(argv[i + 1]);
-            State init = dealSeed(seed);
-            State adv = init;
-            autoAdvance(adv);
-            std::vector<State> kids;
-            genChildren(adv, kids);
             size_t nodes = 0;
-            Outcome o = solve(init, budget, &nodes);
-            std::printf("seed %llu: %s  (initial children: %zu, nodes: %zu)\n",
-                        (unsigned long long)seed,
+            Outcome o = solve(dealSeed(seed), budget, &nodes);
+            std::printf("seed %llu: %s  (nodes: %zu)\n", (unsigned long long)seed,
                         o == SOLVED ? "solvable" : o == UNSOLVABLE ? "unsolvable" : "undetermined",
-                        kids.size(), nodes);
+                        nodes);
             return 0;
         }
 
@@ -381,7 +381,7 @@ int main(int argc, char** argv) {
     uint64_t start = (uint64_t)argLong(argc, argv, "--start", 0);
     int threads = (int)argLong(argc, argv, "--threads", 0);
     if (threads <= 0) threads = std::max(1u, std::thread::hardware_concurrency());
-    threads = std::min<long>(threads, deals);
+    threads = (int)std::min<long>(threads, deals);
 
     std::printf("Sawayama Solitaire — Monte Carlo winnability\n");
     std::printf("deals: %ld (seeds %llu..%llu), budget: %zu states/deal, threads: %d\n\n", deals,
@@ -425,7 +425,7 @@ int main(int argc, char** argv) {
                 pct(all.undetermined), budget);
 
     long resolved = all.solved + all.unsolvable;
-    Wilson w = wilson(all.solved, resolved);
+    CI w = wilson(all.solved, resolved);
     std::printf("win rate among resolved deals: %.2f%%  (95%% CI [%.2f%%, %.2f%%])\n",
                 resolved ? 100.0 * all.solved / resolved : 0.0, 100.0 * w.lo, 100.0 * w.hi);
     std::printf("overall bounds (undetermined as loss .. win): [%.2f%%, %.2f%%]\n",
