@@ -342,6 +342,8 @@ State dealSeed(uint64_t seed) {
 
 struct Tally {
     long solved = 0, unsolvable = 0, undetermined = 0;
+    unsigned long long totalNodes = 0;   // work across every attempt (for on-demand cost)
+    std::vector<uint32_t> solveNodes;     // nodes-to-solve for solved deals
     std::vector<uint64_t> unsolvableSeeds;
     std::vector<uint64_t> undeterminedSeeds;
 };
@@ -396,8 +398,10 @@ int main(int argc, char** argv) {
         pool.emplace_back([&, t, lo, hi] {
             Tally& tl = partials[t];
             for (long seed = lo; seed < hi; ++seed) {
-                Outcome o = solve(dealSeed((uint64_t)seed), budget);
-                if (o == SOLVED) tl.solved++;
+                size_t nd = 0;
+                Outcome o = solve(dealSeed((uint64_t)seed), budget, &nd);
+                tl.totalNodes += nd;
+                if (o == SOLVED) { tl.solved++; tl.solveNodes.push_back((uint32_t)nd); }
                 else if (o == UNSOLVABLE) { tl.unsolvable++; tl.unsolvableSeeds.push_back(seed); }
                 else { tl.undetermined++; tl.undeterminedSeeds.push_back(seed); }
             }
@@ -411,6 +415,8 @@ int main(int argc, char** argv) {
         all.solved += p.solved;
         all.unsolvable += p.unsolvable;
         all.undetermined += p.undetermined;
+        all.totalNodes += p.totalNodes;
+        all.solveNodes.insert(all.solveNodes.end(), p.solveNodes.begin(), p.solveNodes.end());
         all.unsolvableSeeds.insert(all.unsolvableSeeds.end(), p.unsolvableSeeds.begin(), p.unsolvableSeeds.end());
         all.undeterminedSeeds.insert(all.undeterminedSeeds.end(), p.undeterminedSeeds.begin(), p.undeterminedSeeds.end());
     }
@@ -431,6 +437,28 @@ int main(int argc, char** argv) {
     std::printf("overall bounds (undetermined as loss .. win): [%.2f%%, %.2f%%]\n",
                 pct(all.solved), pct(all.solved + all.undetermined));
     std::printf("ran in %.1fs (%.2f ms/deal)\n", secs, n ? 1000.0 * secs / n : 0.0);
+
+    // On-demand feasibility: how cheap is it to find a win for a winnable deal,
+    // and to deliver one winnable deal by retrying random deals until one solves
+    // within the budget (never proving unsolvable).
+    double perNodeNs = all.totalNodes ? secs * threads * 1e9 / all.totalNodes : 0;
+    std::sort(all.solveNodes.begin(), all.solveNodes.end());
+    auto pctl = [&](double q) -> uint32_t {
+        if (all.solveNodes.empty()) return 0;
+        return all.solveNodes[(size_t)(q * (all.solveNodes.size() - 1))];
+    };
+    auto ms = [&](double nodes) { return nodes * perNodeNs / 1e6; };
+    std::printf("\n--- on-demand feasibility (~%.2f us/node, single-thread, this machine) ---\n",
+                perNodeNs / 1000.0);
+    std::printf("nodes to solve a winnable deal: median %u (~%.1f ms), p90 %u (~%.1f ms), "
+                "p99 %u (~%.1f ms), max %u (~%.0f ms)\n",
+                pctl(.5), ms(pctl(.5)), pctl(.9), ms(pctl(.9)), pctl(.99), ms(pctl(.99)),
+                all.solveNodes.empty() ? 0 : all.solveNodes.back(), ms(all.solveNodes.empty() ? 0 : all.solveNodes.back()));
+    if (all.solved) {
+        double expNodes = (double)all.totalNodes / all.solved;
+        std::printf("deal->solve(budget)->retry: ~%.0f nodes per winnable deal delivered (~%.0f ms native, "
+                    "~3x on wasm)\n", expNodes, ms(expNodes));
+    }
 
     auto printSeeds = [](const char* label, const std::vector<uint64_t>& v) {
         if (v.empty()) return;
