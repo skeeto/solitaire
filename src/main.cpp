@@ -20,6 +20,10 @@
 #include "render.hpp"
 #include "storage.hpp"
 
+#ifndef APP_VERSION
+#define APP_VERSION "dev"  // overridden by the build (see CMakeLists.txt)
+#endif
+
 namespace {
 constexpr Uint64 kDoubleClickMs = 350;
 constexpr float kDealStagger = 0.035f;  // delay between successive dealt cards
@@ -541,6 +545,11 @@ struct App {
         drawButton(layout.redealBtn, "Re-deal");
         rr.fillRoundedRect(layout.muteBtn, layout.muteBtn.h * 0.25f, rgba(34, 120, 92));
         rr.drawSpeaker(layout.muteBtn, stats.muted, rgba(240, 248, 244));
+
+        // Faint build version, anchored to the bottom-right corner.
+        float vs = layout.uiTextPx * 0.3f;
+        rr.drawText(layout.versionAnchor.x - rr.textWidth(vs, APP_VERSION),
+                    layout.versionAnchor.y - rr.textHeight(vs), vs, rgba(255, 255, 255, 110), APP_VERSION);
 
         // Lift (dragged or in-flight cards) on top.
         if (lift.active) {

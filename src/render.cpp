@@ -242,6 +242,8 @@ static Layout layoutCore(float w, float h, int wasteCount) {
             L.tableau[col] = SDL_FRect{rightX + col * (L.cardW + colGap), tabTop, L.cardW, L.cardH};
         L.fanY = fanForHeight(L.cardH, h - tabTop - margin);
     }
+    // Bottom-right anchor for the faint version label (same in both orientations).
+    L.versionAnchor = SDL_FRect{w - margin, h - margin, 0, 0};
     return L;
 }
 
@@ -254,6 +256,7 @@ static void offsetLayout(Layout& L, float dx, float dy) {
     sh(L.redealBtn);
     sh(L.muteBtn);
     sh(L.winsAnchor);
+    sh(L.versionAnchor);
 }
 
 Layout computeLayout(float w, float h, int wasteCount) {

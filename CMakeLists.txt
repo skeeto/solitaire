@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(SawayamaSolitaire CXX)
+project(SawayamaSolitaire VERSION 1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,6 +37,8 @@ add_executable(solitaire
 )
 target_include_directories(solitaire PRIVATE third_party)
 target_link_libraries(solitaire PRIVATE SDL3::SDL3-static)
+# Single source of truth for the version the game displays on screen.
+target_compile_definitions(solitaire PRIVATE APP_VERSION="${PROJECT_VERSION}")
 
 if(EMSCRIPTEN)
     # Emscripten only links statically; emit index.html via our PWA shell.
@@ -80,6 +82,7 @@ endif()
 # --- Native window icon and platform packaging ---
 if(WIN32)
     set(ICON_ICO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.ico")
+    string(REPLACE "." "," APP_VERSION_RC "${PROJECT_VERSION}.0")  # 1.0.0 -> 1,0,0,0
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/app.rc.in ${CMAKE_BINARY_DIR}/app.rc @ONLY)
     target_sources(solitaire PRIVATE ${CMAKE_BINARY_DIR}/app.rc)
     set_target_properties(solitaire PROPERTIES WIN32_EXECUTABLE TRUE)  # GUI subsystem (no console)
@@ -90,8 +93,8 @@ if(APPLE AND NOT EMSCRIPTEN)
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "Sawayama Solitaire"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.wellons.sawayamasolitaire"
-        MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_ICON_FILE "icon.icns"
     )
     target_sources(solitaire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/assets/icon.icns)

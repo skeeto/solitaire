@@ -22,8 +22,9 @@ struct Layout {
 
     SDL_FRect redealBtn{};
     SDL_FRect muteBtn{};
-    SDL_FRect winsAnchor{};  // top-right point for the wins text (w=h=0)
-    float uiTextPx = 16.0f;  // UI text pixel height
+    SDL_FRect winsAnchor{};     // top-right point for the wins text (w=h=0)
+    SDL_FRect versionAnchor{};  // bottom-right point for the faint version text
+    float uiTextPx = 16.0f;     // UI text pixel height
 };
 
 Layout computeLayout(float w, float h, int wasteCount);
