@@ -7,7 +7,7 @@
 
 #include <vector>
 
-enum class Sfx { Flip, Pickup, Drop, Swoosh, Shuffle };
+enum class Sfx { Flip, Pickup, Drop, Swoosh, Shuffle, Win, Count };
 
 class Audio {
 public:
@@ -29,7 +29,7 @@ private:
         size_t pos = 0;
     };
 
-    std::vector<float> clips_[5];          // one per Sfx
+    std::vector<float> clips_[static_cast<int>(Sfx::Count)];  // one per Sfx
     std::vector<Voice> voices_;
     SDL_AudioStream* stream_ = nullptr;
     bool muted_ = false;

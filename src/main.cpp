@@ -375,6 +375,7 @@ struct App {
         if (game.won() && !won) {
             won = true;
             stats.wins++;
+            audio.play(Sfx::Win);  // victory ditty as the win screen appears
             saveStats(stats);
             clearGame();  // a finished game shouldn't be resumed
             gameDirty = false;

@@ -97,6 +97,53 @@ std::vector<float> makeShuffle(int rate) {
     return out;
 }
 
+// A triumphant victory jingle: a quick rising C-major arpeggio that lands on a
+// sustained, shimmering major chord. Each note is an additive tone (fundamental +
+// a few harmonics) under a soft bell-like decay; the final chord adds an octave-up
+// shimmer and a gentle tremolo, with a click-free release.
+std::vector<float> makeVictory(int rate) {
+    std::vector<float> out(static_cast<size_t>(rate * 2.1f), 0.0f);
+
+    auto note = [&](float startSec, float freq, float durSec, float amp, float decay,
+                    float tremHz) {
+        int start = static_cast<int>(startSec * rate);
+        int n = static_cast<int>(durSec * rate);
+        for (int i = 0; i < n; ++i) {
+            int idx = start + i;
+            if (idx < 0 || idx >= static_cast<int>(out.size())) break;
+            float t = static_cast<float>(i) / rate;
+            const float atk = 0.005f;
+            float env = (t < atk) ? (t / atk) : std::exp(-(t - atk) * decay);
+            float rem = durSec - t;  // taper the tail so notes don't click off
+            if (rem < 0.03f) env *= rem / 0.03f;
+            if (tremHz > 0.0f) env *= 1.0f - 0.08f * (0.5f - 0.5f * std::cos(2.0f * kPi * tremHz * t));
+            float ph = 2.0f * kPi * freq * t;
+            float s = std::sin(ph) + 0.45f * std::sin(2.0f * ph) + 0.20f * std::sin(3.0f * ph) +
+                      0.08f * std::sin(4.0f * ph);
+            out[idx] += s * 0.5f * env * amp;
+        }
+    };
+
+    // Rising arpeggio (plucky, fast decay): C5 - E5 - G5.
+    note(0.00f, 523.25f, 0.16f, 0.55f, 9.0f, 0.0f);
+    note(0.12f, 659.25f, 0.16f, 0.55f, 9.0f, 0.0f);
+    note(0.24f, 783.99f, 0.16f, 0.55f, 9.0f, 0.0f);
+
+    // Landing chord: sustained C major with C6 singing on top.
+    const float c = 0.36f, dur = 1.65f;
+    note(c, 523.25f, dur, 0.24f, 1.9f, 5.0f);   // C5
+    note(c, 659.25f, dur, 0.22f, 1.9f, 5.0f);   // E5
+    note(c, 783.99f, dur, 0.22f, 1.9f, 5.0f);   // G5
+    note(c, 1046.50f, dur, 0.30f, 1.7f, 5.0f);  // C6 (melody)
+
+    // Octave-up shimmer entering a hair later for sparkle.
+    note(c + 0.04f, 1318.51f, dur - 0.10f, 0.09f, 2.2f, 6.0f);  // E6
+    note(c + 0.04f, 1567.98f, dur - 0.10f, 0.08f, 2.2f, 6.0f);  // G6
+    note(c + 0.08f, 2093.00f, dur - 0.20f, 0.06f, 2.6f, 6.0f);  // C7
+
+    return out;
+}
+
 }  // namespace
 
 bool Audio::init() {
@@ -105,6 +152,7 @@ bool Audio::init() {
     clips_[static_cast<int>(Sfx::Drop)] = makeClick(kRate, 480.0f, 0.075f, 60.0f);
     clips_[static_cast<int>(Sfx::Swoosh)] = makeSwoosh(kRate);
     clips_[static_cast<int>(Sfx::Shuffle)] = makeShuffle(kRate);
+    clips_[static_cast<int>(Sfx::Win)] = makeVictory(kRate);
 
     SDL_AudioSpec spec{};
     spec.freq = kRate;
