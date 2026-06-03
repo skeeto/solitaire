@@ -86,6 +86,11 @@ Pages worktree):
 cmake --install build-web --prefix /path/to/gh-pages-worktree
 ```
 
+Pushing to `master` deploys automatically: the **Deploy PWA** GitHub Action
+(`.github/workflows/deploy.yml`) builds the PWA with Emscripten and force-pushes
+the installed site to the `gh-pages` branch. It can also be run on demand from the
+Actions tab (`workflow_dispatch`). Any existing `gh-pages` `CNAME` is preserved.
+
 This copies the seven deployable files (including the stamped `sw.js`) into the
 prefix; all asset paths are relative, so subdirectory hosting works too.
 
