@@ -19,6 +19,7 @@
 #include "game.hpp"
 #include "render.hpp"
 #include "storage.hpp"
+#include "tutorial.hpp"
 
 #ifndef APP_VERSION
 #define APP_VERSION "dev"  // overridden by the build (see CMakeLists.txt)
@@ -70,6 +71,11 @@ struct App {
     Lift lift;
     bool won = false;
     bool gameDirty = false;  // game changed since last save; persisted once settled
+
+    // Tutorial modal: open state, current page, and the eased 0..1 pop-in.
+    bool tutOpen = false;
+    int tutPage = 0;
+    float tutT = 0;
     Uint64 lastTick = 0;
 
     // Deal animation: cards fly from the stock to their tableau slots, staggered.
@@ -128,6 +134,24 @@ struct App {
     void persist() {
         saveGame(game.serialize());
         gameDirty = false;
+    }
+
+    // --- tutorial modal -------------------------------------------------
+    void openTutorial() {
+        tutOpen = true;
+        tutPage = 0;
+    }
+    void closeTutorial() {
+        if (!tutOpen) return;
+        tutOpen = false;
+        if (!stats.tutorialSeen) {  // the only writer of the persisted flag
+            stats.tutorialSeen = true;
+            saveStats(stats);
+        }
+    }
+    void toggleTutorial() {
+        if (tutOpen) closeTutorial();
+        else openTutorial();
     }
 
     void redeal() {
@@ -395,8 +419,25 @@ struct App {
     }
 
     void onPointerDown(float x, float y) {
+        if (tutOpen) {  // topmost modal: it swallows every click
+            if (inRect(x, y, layout.tutClose)) {
+                closeTutorial();
+            } else if (tutPage > 0 && inRect(x, y, layout.tutBack)) {
+                --tutPage;
+            } else if (inRect(x, y, layout.tutNext)) {
+                if (tutPage + 1 < tutorial::pageCount()) ++tutPage;
+                else closeTutorial();
+            } else if (inRect(x, y, layout.helpBtn) || !inRect(x, y, layout.tutPanel)) {
+                closeTutorial();  // the ? button toggles; the scrim just dismisses
+            }
+            return;
+        }
         if (won) {  // win overlay is a full-screen modal: tap anywhere to play again
             redeal();
+            return;
+        }
+        if (inRect(x, y, layout.helpBtn)) {
+            openTutorial();
             return;
         }
         if (inRect(x, y, layout.redealBtn)) {
@@ -437,9 +478,15 @@ struct App {
     }
 
     void onPointerMove(float x, float y) {
+        if (tutOpen) {  // panel controls, plus the scrim which dismisses
+            setHoverCursor(inRect(x, y, layout.tutClose) || inRect(x, y, layout.tutNext) ||
+                           (tutPage > 0 && inRect(x, y, layout.tutBack)) ||
+                           !inRect(x, y, layout.tutPanel));
+            return;
+        }
         // Hand cursor over the buttons (or anywhere while the win modal is up).
         bool overBtn = inRect(x, y, layout.redealBtn) || inRect(x, y, layout.restartBtn) ||
-                       inRect(x, y, layout.muteBtn);
+                       inRect(x, y, layout.muteBtn) || inRect(x, y, layout.helpBtn);
         setHoverCursor(won || (overBtn && !lift.active));
 
         if (lift.active && lift.followPointer) {
@@ -454,6 +501,10 @@ struct App {
     }
 
     void onPointerUp(float x, float y) {
+        if (tutOpen) {
+            havePress = false;
+            return;
+        }
         if (lift.active && lift.followPointer) {
             resolveDrop();
             havePress = false;
@@ -562,6 +613,7 @@ struct App {
                     rgba(245, 245, 235), buf);
         drawButton(layout.redealBtn, "Re-deal");
         drawButton(layout.restartBtn, "Restart");
+        drawButton(layout.helpBtn, "?");
         rr.fillRoundedRect(layout.muteBtn, layout.muteBtn.h * 0.25f, rgba(34, 120, 92));
         rr.drawSpeaker(layout.muteBtn, stats.muted, rgba(240, 248, 244));
 
@@ -599,6 +651,11 @@ struct App {
                         s2, rgba(230, 230, 230), sub);
         }
 
+        // Tutorial on top of everything, scrim sized to the full canvas like the win
+        // overlay so it covers the safe-area margins too.
+        if (tutT > 0.001f)
+            tutorial::draw(rr, layout, outW, outH, tutPage, smoothstep(tutT));
+
         SDL_RenderPresent(sdl);
     }
 
@@ -609,6 +666,11 @@ struct App {
         if (dt > 0.1f) dt = 0.1f;
 
         audio.update();
+
+        // Tutorial pop-in/out. Input gates on tutOpen so dismissal is instant; drawing
+        // gates on tutT so the close-out still animates.
+        const float tutStep = dt / 0.14f;
+        tutT = std::clamp(tutT + (tutOpen ? tutStep : -tutStep), 0.0f, 1.0f);
 
         if (dealing && nowSec() - dealStart > dealEnd) {
             dealing = false;
@@ -676,7 +738,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
     // Resume a saved in-progress game if there is one; otherwise deal a fresh
     // game with the opening cascade.
     std::string saved = loadGame();
-    if (!saved.empty() && app->game.deserialize(saved) && !app->game.won()) {
+    bool resumed = !saved.empty() && app->game.deserialize(saved) && !app->game.won();
+    if (resumed) {
         app->dealing = false;
     } else {
         app->game.dealWinnable();  // fresh, proven-winnable opening
@@ -684,6 +747,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int, char**) {
         app->persist();  // save the opening deal so a refresh resumes it
     }
     app->refreshLayout();
+    // Teach the rules on a genuinely first launch only: flag unset and no history,
+    // so a player whose stored flag was lost isn't taught all over again.
+    if (!app->stats.tutorialSeen && app->stats.wins == 0 && !resumed) app->openTutorial();
     return SDL_APP_CONTINUE;
 }
 
@@ -710,10 +776,25 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
             app->onPointerMove(event->motion.x, event->motion.y);
             break;
         case SDL_EVENT_KEY_DOWN:
-            if (event->key.key == SDLK_R) app->redeal();
-            else if (event->key.key == SDLK_S) app->restart();
-            else if (event->key.key == SDLK_M) app->setMuted(!app->stats.muted);
-            else if (event->key.key == SDLK_ESCAPE) return SDL_APP_SUCCESS;
+            if (event->key.key == SDLK_H || event->key.key == SDLK_SLASH ||
+                event->key.key == SDLK_QUESTION) {
+                app->toggleTutorial();
+            } else if (event->key.key == SDLK_ESCAPE) {
+                // Escape still quits, except while the tutorial modal is up.
+                if (app->tutOpen) app->closeTutorial();
+                else return SDL_APP_SUCCESS;
+            } else if (app->tutOpen) {
+                // Board keys are inert behind the modal; the arrows page instead.
+                if (event->key.key == SDLK_LEFT && app->tutPage > 0) --app->tutPage;
+                else if (event->key.key == SDLK_RIGHT &&
+                         app->tutPage + 1 < tutorial::pageCount()) ++app->tutPage;
+            } else if (event->key.key == SDLK_R) {
+                app->redeal();
+            } else if (event->key.key == SDLK_S) {
+                app->restart();
+            } else if (event->key.key == SDLK_M) {
+                app->setMuted(!app->stats.muted);
+            }
             break;
         default:
             break;

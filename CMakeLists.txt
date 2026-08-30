@@ -33,6 +33,7 @@ add_executable(solitaire
     src/render.cpp
     src/audio.cpp
     src/storage.cpp
+    src/tutorial.cpp
     src/stb_impl.cpp
 )
 target_include_directories(solitaire PRIVATE third_party)

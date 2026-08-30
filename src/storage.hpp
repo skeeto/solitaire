@@ -8,6 +8,7 @@
 struct Stats {
     int wins = 0;
     bool muted = false;
+    bool tutorialSeen = false;  // the first-run tutorial has been dismissed
 };
 
 Stats loadStats();

@@ -22,8 +22,11 @@ See [docs/sawayama-solitaire.md](docs/sawayama-solitaire.md) for the full rules.
   reset. When the stock runs out, that slot becomes a single **free cell**.
 - Cards advance to the foundations automatically (a conservative auto-mover);
   **double-click** a card to force it up.
-- **RE-DEAL** starts a new (always winnable) game at any time. The speaker icon
-  toggles sound. Lifetime wins are shown top-right and persisted.
+- **RE-DEAL** starts a new (always winnable) game at any time; **RESTART** replays
+  the current deal from its opening. The speaker icon toggles sound, and **?** brings
+  up the tutorial (shown once on a first run). Lifetime wins are shown top-right and
+  persisted.
+- Keyboard: `R` re-deal, `S` restart, `M` mute, `H` (or `?`) tutorial, `Esc` quit.
 
 ## Winnable deals
 

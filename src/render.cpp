@@ -178,13 +178,15 @@ static Layout layoutCore(float w, float h, int wasteCount) {
 
         L.winsAnchor = SDL_FRect{w - margin, margin, 0, 0};
         const float btnTop = margin + winsH + gap;
-        // Button row, right-aligned: [mute][Restart][Re-deal]. Both labels are the
-        // same length, so one width serves both; clamp so the pair plus the mute
-        // square always fits inside the margins on narrow screens.
-        const float btnW = std::min(L.cardW * 1.6f, (w - 2 * margin - btnH - 2 * gap) * 0.5f);
+        // Button row, right-aligned: [?][mute][Restart][Re-deal]. Both labels are the
+        // same length, so one width serves both; clamp so the pair plus the two
+        // square icon buttons always fits inside the margins on narrow screens.
+        const float btnW = std::max(
+            btnH, std::min(L.cardW * 1.6f, (w - 2 * margin - 2 * btnH - 3 * gap) * 0.5f));
         L.redealBtn = SDL_FRect{w - margin - btnW, btnTop, btnW, btnH};
         L.restartBtn = SDL_FRect{L.redealBtn.x - gap - btnW, btnTop, btnW, btnH};
         L.muteBtn = SDL_FRect{L.restartBtn.x - gap - btnH, btnTop, btnH, btnH};
+        L.helpBtn = SDL_FRect{L.muteBtn.x - gap - btnH, btnTop, btnH, btnH};
 
         // Row A: stock (left) + foundations (right), arranged horizontally on top.
         const float rowA = margin + headerH;
@@ -237,6 +239,9 @@ static Layout layoutCore(float w, float h, int wasteCount) {
         L.restartBtn = SDL_FRect{w - margin - btnW, btnTop, btnW, btnH};
         L.redealBtn = SDL_FRect{w - margin - btnW, btnTop + btnH + bgap, btnW, btnH};
         L.muteBtn = SDL_FRect{L.redealBtn.x - bgap - btnH, L.redealBtn.y, btnH, btnH};
+        // [?] completes the 2x2 grid above the mute square, so the cluster keeps its
+        // width -- clusterW below bounds the waste fan and must not grow.
+        L.helpBtn = SDL_FRect{L.muteBtn.x, L.restartBtn.y, btnH, btnH};
         // Reserve room for the wins text (~10 chars) and the widest button row.
         const float clusterW = std::max(btnW + btnH + bgap, 10.0f * L.uiTextPx * 0.62f);
         const float clusterLeft = w - margin - clusterW;
@@ -251,6 +256,58 @@ static Layout layoutCore(float w, float h, int wasteCount) {
             L.tableau[col] = SDL_FRect{rightX + col * (L.cardW + colGap), tabTop, L.cardW, L.cardH};
         L.fanY = fanForHeight(L.cardH, h - tabTop - margin);
     }
+    // --- Tutorial overlay: a centred modal, sized off the viewport rather than the
+    // board. Diagram beside the text on wide viewports, stacked above it otherwise;
+    // this test is deliberately independent of L.vertical, since a merely-wider-than-
+    // tall window still reads better with a stacked panel.
+    const bool tutWide = w >= h * 1.6f;
+    float pw, ph;
+    if (tutWide) {
+        pw = std::min(w * 0.80f, h * 2.2f);
+        ph = std::min(h * 0.88f, pw * 0.62f);
+    } else {
+        pw = std::min(w * 0.92f, h * 0.72f);
+        ph = std::min(h * 0.80f, pw * 1.45f);
+    }
+    L.tutPanel = SDL_FRect{(w - pw) * 0.5f, (h - ph) * 0.5f, pw, ph};
+
+    const float tpad = std::min(pw, ph) * 0.07f;
+    L.tutTextPx = std::clamp(std::min(pw * 0.045f, ph * 0.062f), 11.0f, 26.0f);
+    const float innerX = L.tutPanel.x + tpad;
+    const float innerR = L.tutPanel.x + pw - tpad;
+    const float innerY = L.tutPanel.y + tpad;
+    const float innerW = innerR - innerX;
+
+    // Back/Next are capped at half the inner width so they still fit side by side
+    // on a ~300px panel; the dots get their own band rather than sitting between them.
+    const float ctrlH = std::max(26.0f, ph * 0.13f);
+    const float ctrlW = std::min(std::max(ctrlH * 2.1f, pw * 0.20f), (innerW - tpad) * 0.5f);
+    const float ctrlY = L.tutPanel.y + ph - tpad - ctrlH;
+    L.tutBack = SDL_FRect{innerX, ctrlY, ctrlW, ctrlH};
+    L.tutNext = SDL_FRect{innerR - ctrlW, ctrlY, ctrlW, ctrlH};
+
+    const float dotsH = L.tutTextPx * 1.6f;
+    L.tutDots = SDL_FRect{innerX, ctrlY - tpad * 0.4f - dotsH, innerW, dotsH};
+
+    const float closeS = std::clamp(ctrlH * 0.9f, 22.0f, 40.0f);
+    L.tutClose = SDL_FRect{innerR - closeS, innerY, closeS, closeS};
+
+    const float titleH = L.tutTextPx * 1.5f;
+    L.tutTitle = SDL_FRect{innerX, innerY, innerW - closeS - tpad * 0.5f, titleH};
+
+    const float bodyTop = innerY + titleH + tpad * 0.5f;
+    const float bodyBot = L.tutDots.y - tpad * 0.4f;
+    if (tutWide) {
+        const float dw = innerW * 0.42f;
+        L.tutDiagram = SDL_FRect{innerX, bodyTop, dw, bodyBot - bodyTop};
+        L.tutText = SDL_FRect{innerX + dw + tpad, bodyTop, innerW - dw - tpad, bodyBot - bodyTop};
+    } else {
+        const float dh = (bodyBot - bodyTop) * 0.44f;
+        L.tutDiagram = SDL_FRect{innerX, bodyTop, innerW, dh};
+        L.tutText = SDL_FRect{innerX, bodyTop + dh + tpad * 0.5f, innerW,
+                              (bodyBot - bodyTop) - dh - tpad * 0.5f};
+    }
+
     // Bottom-right anchor for the faint version label (same in both orientations).
     L.versionAnchor = SDL_FRect{w - margin, h - margin, 0, 0};
     return L;
@@ -265,6 +322,15 @@ static void offsetLayout(Layout& L, float dx, float dy) {
     sh(L.redealBtn);
     sh(L.restartBtn);
     sh(L.muteBtn);
+    sh(L.helpBtn);
+    sh(L.tutPanel);
+    sh(L.tutTitle);
+    sh(L.tutDiagram);
+    sh(L.tutText);
+    sh(L.tutDots);
+    sh(L.tutBack);
+    sh(L.tutNext);
+    sh(L.tutClose);
     sh(L.winsAnchor);
     sh(L.versionAnchor);
 }
@@ -539,6 +605,26 @@ void Renderer::drawText(float x, float y, float px, SDL_FColor c, const char* st
 
 float Renderer::textWidth(float px, const char* str) const {
     return font_ ? font_->width(px, str) : 0.0f;
+}
+
+std::vector<std::string> Renderer::wrapText(float px, float maxW, const char* str) const {
+    std::vector<std::string> out;
+    std::string line;
+    for (const char* p = str; *p;) {
+        const char* e = p;
+        while (*e && *e != ' ') ++e;
+        std::string word(p, e - p);
+        std::string cand = line.empty() ? word : line + " " + word;
+        if (!line.empty() && textWidth(px, cand.c_str()) > maxW) {
+            out.push_back(line);
+            line = word;
+        } else {
+            line = cand;
+        }
+        p = (*e == ' ') ? e + 1 : e;
+    }
+    if (!line.empty()) out.push_back(line);
+    return out;
 }
 
 float Renderer::textHeight(float px) const { return font_ ? font_->height(px) : px; }

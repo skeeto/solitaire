@@ -5,6 +5,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <string>
+#include <vector>
+
 #include "game.hpp"
 
 struct Layout {
@@ -23,6 +26,18 @@ struct Layout {
     SDL_FRect redealBtn{};
     SDL_FRect restartBtn{};  // replays the current deal from its opening
     SDL_FRect muteBtn{};
+    SDL_FRect helpBtn{};  // "?" square, same size as muteBtn: opens the tutorial
+
+    // Tutorial overlay: a centred modal, laid out independently of the board.
+    SDL_FRect tutPanel{};
+    SDL_FRect tutTitle{};    // band the page title shrinks to fit
+    SDL_FRect tutDiagram{};  // card diagram area (painted with the table green)
+    SDL_FRect tutText{};     // wrapped body copy
+    SDL_FRect tutDots{};     // page dots, centred in this band
+    SDL_FRect tutBack{};
+    SDL_FRect tutNext{};     // reads "Play" on the last page
+    SDL_FRect tutClose{};    // "X" square, top-right inside the panel
+    float tutTextPx = 14.0f;  // body text size before the fit-to-box shrink
     SDL_FRect winsAnchor{};     // top-right point for the wins text (w=h=0)
     SDL_FRect versionAnchor{};  // bottom-right point for the faint version text
     float uiTextPx = 16.0f;     // UI text pixel height
@@ -65,6 +80,10 @@ public:
     void drawText(float x, float y, float px, SDL_FColor c, const char* str);
     float textWidth(float px, const char* str) const;
     float textHeight(float px) const;
+
+    // Greedy word wrap into a column `maxW` wide. Splits on spaces only; a single
+    // word wider than the column gets its own (overlong) line rather than being cut.
+    std::vector<std::string> wrapText(float px, float maxW, const char* str) const;
 
     void drawSpeaker(SDL_FRect rc, bool muted, SDL_FColor c);
 

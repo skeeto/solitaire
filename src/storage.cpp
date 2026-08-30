@@ -21,12 +21,14 @@ Stats loadStats() {
     Stats s;
     s.wins = js_get_int("sawayama_wins", 0);
     s.muted = js_get_int("sawayama_muted", 0) != 0;
+    s.tutorialSeen = js_get_int("sawayama_tutorial_seen", 0) != 0;
     return s;
 }
 
 void saveStats(const Stats& s) {
     js_set_int("sawayama_wins", s.wins);
     js_set_int("sawayama_muted", s.muted ? 1 : 0);
+    js_set_int("sawayama_tutorial_seen", s.tutorialSeen ? 1 : 0);
 }
 
 EM_JS(char*, js_get_str, (const char* key), {
@@ -71,10 +73,12 @@ Stats loadStats() {
     std::string path = statsPath();
     if (path.empty()) return s;
     if (FILE* f = std::fopen(path.c_str(), "r")) {
-        int wins = 0, muted = 0;
-        if (std::fscanf(f, "%d %d", &wins, &muted) >= 1) {
+        int wins = 0, muted = 0, seen = 0;
+        // >= 1 so a two-field file from an older build still loads (seen stays 0).
+        if (std::fscanf(f, "%d %d %d", &wins, &muted, &seen) >= 1) {
             s.wins = wins;
             s.muted = muted != 0;
+            s.tutorialSeen = seen != 0;
         }
         std::fclose(f);
     }
@@ -85,7 +89,7 @@ void saveStats(const Stats& s) {
     std::string path = statsPath();
     if (path.empty()) return;
     if (FILE* f = std::fopen(path.c_str(), "w")) {
-        std::fprintf(f, "%d %d\n", s.wins, s.muted ? 1 : 0);
+        std::fprintf(f, "%d %d %d\n", s.wins, s.muted ? 1 : 0, s.tutorialSeen ? 1 : 0);
         std::fclose(f);
     }
 }
