@@ -40,6 +40,11 @@ struct Game {
 
     Xoshiro256ss rng;
 
+    // Seed of the current deal, when it came from the winnable pool (or from an
+    // explicit dealSeeded()). Lets the game be restarted from its own opening.
+    uint32_t seed = 0;
+    bool hasSeed = false;
+
     Game();
 
     // Shuffle and deal a fresh game, filtering out openings that expose an Ace.
@@ -51,6 +56,9 @@ struct Game {
     // the player only ever sees winnable openings. Picks a random pool seed using
     // its own entropy source (the chosen seed is then reproduced deterministically).
     void dealWinnable();
+
+    // Re-deal the exact opening produced by `s` (records it in seed/hasSeed).
+    void dealSeeded(uint32_t s);
 
     // Draw up to three cards from the stock to the waste (single pass). Unlocks
     // the free cell once the stock is exhausted. Returns how many were drawn.

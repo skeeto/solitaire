@@ -178,9 +178,13 @@ static Layout layoutCore(float w, float h, int wasteCount) {
 
         L.winsAnchor = SDL_FRect{w - margin, margin, 0, 0};
         const float btnTop = margin + winsH + gap;
-        const float redealW = L.cardW * 1.6f;
-        L.redealBtn = SDL_FRect{w - margin - redealW, btnTop, redealW, btnH};
-        L.muteBtn = SDL_FRect{L.redealBtn.x - gap - btnH, btnTop, btnH, btnH};
+        // Button row, right-aligned: [mute][Restart][Re-deal]. Both labels are the
+        // same length, so one width serves both; clamp so the pair plus the mute
+        // square always fits inside the margins on narrow screens.
+        const float btnW = std::min(L.cardW * 1.6f, (w - 2 * margin - btnH - 2 * gap) * 0.5f);
+        L.redealBtn = SDL_FRect{w - margin - btnW, btnTop, btnW, btnH};
+        L.restartBtn = SDL_FRect{L.redealBtn.x - gap - btnW, btnTop, btnW, btnH};
+        L.muteBtn = SDL_FRect{L.restartBtn.x - gap - btnH, btnTop, btnH, btnH};
 
         // Row A: stock (left) + foundations (right), arranged horizontally on top.
         const float rowA = margin + headerH;
@@ -223,13 +227,18 @@ static Layout layoutCore(float w, float h, int wasteCount) {
         // Wins counter + buttons cluster, top-right.
         const float winsH = L.uiTextPx;
         const float btnH = std::max(22.0f, L.cardH * 0.30f);
-        const float redealW = L.cardW * 1.6f;
+        const float bgap = margin * 0.6f;
+        const float btnW = L.cardW * 1.6f;  // same width for Restart and Re-deal
         L.winsAnchor = SDL_FRect{w - margin, margin, 0, 0};
-        const float btnTop = margin + winsH + margin * 0.6f;
-        L.redealBtn = SDL_FRect{w - margin - redealW, btnTop, redealW, btnH};
-        L.muteBtn = SDL_FRect{L.redealBtn.x - margin * 0.6f - btnH, btnTop, btnH, btnH};
-        // Reserve room for the wins text (~10 chars) and the button row.
-        const float clusterW = std::max(redealW + margin + btnH, 10.0f * L.uiTextPx * 0.62f);
+        // Here width is what the waste band competes for, so the buttons stack
+        // (Restart over Re-deal) instead of spreading into a row; vertical space
+        // beside the foundations is free.
+        const float btnTop = margin + winsH + bgap;
+        L.restartBtn = SDL_FRect{w - margin - btnW, btnTop, btnW, btnH};
+        L.redealBtn = SDL_FRect{w - margin - btnW, btnTop + btnH + bgap, btnW, btnH};
+        L.muteBtn = SDL_FRect{L.redealBtn.x - bgap - btnH, L.redealBtn.y, btnH, btnH};
+        // Reserve room for the wins text (~10 chars) and the widest button row.
+        const float clusterW = std::max(btnW + btnH + bgap, 10.0f * L.uiTextPx * 0.62f);
         const float clusterLeft = w - margin - clusterW;
 
         const float rightX = margin + L.cardW + bigPad;
@@ -254,6 +263,7 @@ static void offsetLayout(Layout& L, float dx, float dy) {
     for (auto& f : L.foundations) sh(f);
     for (auto& t : L.tableau) sh(t);
     sh(L.redealBtn);
+    sh(L.restartBtn);
     sh(L.muteBtn);
     sh(L.winsAnchor);
     sh(L.versionAnchor);

@@ -72,8 +72,14 @@ void Game::dealWinnable() {
         seed = (uint32_t)picker.bounded(kWinnablePoolBits);
     } while (!isWinnable(seed));
 
-    rng.seed(seed);
+    dealSeeded(seed);
+}
+
+void Game::dealSeeded(uint32_t s) {
+    rng.seed(s);
     deal();
+    seed = s;
+    hasSeed = true;
 }
 
 int Game::draw3() {
@@ -161,6 +167,7 @@ std::string Game::serialize() const {
         for (const auto& c : tableau[i]) o << ' ' << cardId(c);
         o << '\n';
     }
+    if (hasSeed) o << "R " << seed << '\n';
     return o.str();
 }
 
@@ -199,6 +206,15 @@ bool Game::deserialize(const std::string& s) {
     stock = std::move(s2);
     waste = std::move(w2);
     for (int i = 0; i < 7; ++i) tableau[i] = std::move(t2[i]);
+
+    // Optional trailer (absent in saves written before restart existed): the
+    // seed this deal came from, so Restart can reproduce the opening.
+    unsigned long sd = 0;
+    hasSeed = false;
+    if ((in >> tag) && tag == "R" && (in >> sd)) {
+        seed = (uint32_t)sd;
+        hasSeed = true;
+    }
     return true;
 }
 

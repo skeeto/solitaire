@@ -132,6 +132,18 @@ struct App {
 
     void redeal() {
         game.dealWinnable();
+        beginNewDeal();
+    }
+
+    // Replay the current deal from its opening. Saves written before seeds were
+    // recorded have no opening to return to, so those fall back to a fresh deal.
+    void restart() {
+        if (game.hasSeed) game.dealSeeded(game.seed);
+        else game.dealWinnable();
+        beginNewDeal();
+    }
+
+    void beginNewDeal() {
         won = false;
         drawing = false;
         lift = Lift{};
@@ -391,6 +403,10 @@ struct App {
             redeal();
             return;
         }
+        if (inRect(x, y, layout.restartBtn)) {
+            restart();
+            return;
+        }
         if (inRect(x, y, layout.muteBtn)) {
             setMuted(!stats.muted);
             return;
@@ -422,7 +438,8 @@ struct App {
 
     void onPointerMove(float x, float y) {
         // Hand cursor over the buttons (or anywhere while the win modal is up).
-        bool overBtn = inRect(x, y, layout.redealBtn) || inRect(x, y, layout.muteBtn);
+        bool overBtn = inRect(x, y, layout.redealBtn) || inRect(x, y, layout.restartBtn) ||
+                       inRect(x, y, layout.muteBtn);
         setHoverCursor(won || (overBtn && !lift.active));
 
         if (lift.active && lift.followPointer) {
@@ -544,6 +561,7 @@ struct App {
         rr.drawText(layout.winsAnchor.x - rr.textWidth(ws, buf), layout.winsAnchor.y, ws,
                     rgba(245, 245, 235), buf);
         drawButton(layout.redealBtn, "Re-deal");
+        drawButton(layout.restartBtn, "Restart");
         rr.fillRoundedRect(layout.muteBtn, layout.muteBtn.h * 0.25f, rgba(34, 120, 92));
         rr.drawSpeaker(layout.muteBtn, stats.muted, rgba(240, 248, 244));
 
@@ -693,6 +711,7 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
             break;
         case SDL_EVENT_KEY_DOWN:
             if (event->key.key == SDLK_R) app->redeal();
+            else if (event->key.key == SDLK_S) app->restart();
             else if (event->key.key == SDLK_M) app->setMuted(!app->stats.muted);
             else if (event->key.key == SDLK_ESCAPE) return SDL_APP_SUCCESS;
             break;

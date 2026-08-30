@@ -21,6 +21,7 @@ struct Layout {
     SDL_FRect tableau[7]{};  // top-card rect of each column
 
     SDL_FRect redealBtn{};
+    SDL_FRect restartBtn{};  // replays the current deal from its opening
     SDL_FRect muteBtn{};
     SDL_FRect winsAnchor{};     // top-right point for the wins text (w=h=0)
     SDL_FRect versionAnchor{};  // bottom-right point for the faint version text
